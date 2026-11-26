@@ -8,17 +8,34 @@ import { meshService } from '../services/meshService';
 
 export default function RootLayout() {
   useEffect(() => {
-    void initDatabase();
-    void meshService.start();
+    try {
+      void initDatabase().catch((e) => console.warn('initDatabase error:', e));
+    } catch (e) {
+      console.warn('initDatabase sync error:', e);
+    }
+
+    try {
+      void meshService.start().catch((e) => console.warn('meshService start error:', e));
+    } catch (e) {
+      console.warn('meshService sync error:', e);
+    }
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       // OS power policies suspend background BLE scanning; track foreground state explicitly
-      meshService.setForegroundActive(nextState === 'active');
+      try {
+        meshService.setForegroundActive(nextState === 'active');
+      } catch (e) {
+        console.warn('meshService setForegroundActive error:', e);
+      }
     });
 
     return () => {
       subscription.remove();
-      void meshService.stop();
+      try {
+        void meshService.stop().catch((e) => console.warn('meshService stop error:', e));
+      } catch (e) {
+        console.warn('meshService stop sync error:', e);
+      }
     };
   }, []);
 

@@ -21,10 +21,12 @@ export interface NativeSpeechModuleSpec {
 const nativeMesh = NativeModules.VozGuiaMesh as NativeMeshModuleSpec | undefined;
 const nativeSpeech = NativeModules.VozGuiaSpeech as NativeSpeechModuleSpec | undefined;
 
-export const meshEmitter = nativeMesh ? new NativeEventEmitter(NativeModules.VozGuiaMesh) : null;
-export const speechEmitter = nativeSpeech
-  ? new NativeEventEmitter(NativeModules.VozGuiaSpeech)
-  : null;
+export const meshEmitter =
+  nativeMesh && NativeModules.VozGuiaMesh ? new NativeEventEmitter(NativeModules.VozGuiaMesh) : null;
+export const speechEmitter =
+  nativeSpeech && NativeModules.VozGuiaSpeech
+    ? new NativeEventEmitter(NativeModules.VozGuiaSpeech)
+    : null;
 
 export function hasNativeMeshModule(): boolean {
   return Platform.OS === 'android' && Boolean(nativeMesh);

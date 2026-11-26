@@ -21,22 +21,27 @@ function getSyncRaw(key: string): string | null {
     return memoryCache.get(key) ?? null;
   }
   try {
-    const val = Storage.getItemSync(key);
-    if (val !== null) {
-      memoryCache.set(key, val);
+    if (Storage && typeof Storage.getItemSync === 'function') {
+      const val = Storage.getItemSync(key);
+      if (val !== null) {
+        memoryCache.set(key, val);
+      }
+      return val;
     }
-    return val;
   } catch {
-    return null;
+    // fallback
   }
+  return null;
 }
 
 function setSyncRaw(key: string, value: string): void {
   memoryCache.set(key, value);
   try {
-    Storage.setItemSync(key, value);
+    if (Storage && typeof Storage.setItemSync === 'function') {
+      Storage.setItemSync(key, value);
+    }
   } catch {
-    // Web / non-native fallback keeps memoryCache active
+    // fallback
   }
 }
 
