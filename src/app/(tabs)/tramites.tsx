@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AccessibleButton } from '../../components/AccessibleButton';
@@ -14,6 +14,7 @@ const CATEGORIES: { key: 'all' | TramiteCategory; label: string }[] = [
 ];
 
 export default function TramitesCatalogScreen() {
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<'all' | TramiteCategory>('all');
   const [results, setResults] = useState<SearchResult[]>([]);

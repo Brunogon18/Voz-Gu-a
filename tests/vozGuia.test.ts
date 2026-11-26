@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TRAMITES_CATALOG } from '../src/data/tramitesCatalog';
-import { buildOfflineGuideResponse } from '../src/services/geminiService';
+import {
+  analyzeDocumentWithGemini,
+  buildDocumentAnalysisBody,
+  buildGenerateContentBody,
+  buildOfflineGuideResponse,
+  DEFAULT_GEMINI_MODEL,
+  extractBase64FromPickerAsset,
+  parseVoiceGuideJson,
+  resolveGeminiModel,
+} from '../src/services/geminiService';
 import { ControlledFloodingRouter } from '../src/services/meshRouter';
 import { createVectorIndex, searchVectorIndex } from '../src/services/vectorSearch';
 
@@ -49,4 +58,96 @@ test('buildOfflineGuideResponse simplifies instructions when requested', () => {
   assert.equal(simplified.source, 'offline-local');
   assert.ok(simplified.steps.length > 0);
   assert.equal(simplified.steps[0].instruction, cita?.steps[0].simpleExplanation);
+});
+
+test('resolveGeminiModel migrates deprecated models to current Gemini 3.x IDs', () => {
+  assert.equal(resolveGeminiModel(undefined), DEFAULT_GEMINI_MODEL);
+  assert.equal(resolveGeminiModel('gemini-2.5-flash'), 'gemini-3.5-flash-lite');
+  assert.equal(resolveGeminiModel('gemini-2.5-pro'), 'gemini-3.8-flash');
+  assert.equal(resolveGeminiModel('gemini-3.8-flash'), 'gemini-3.8-flash');
+});
+
+test('buildGenerateContentBody uses JSON schema, valid thinkingLevel, and multi-turn history', () => {
+  const index = createVectorIndex(TRAMITES_CATALOG);
+  const results = searchVectorIndex(index, 'cita imss');
+
+  const liteBody = buildGenerateContentBody({
+    query: '¿Y si no tengo correo?',
+    searchResults: results,
+    model: 'gemini-3.5-flash-lite',
+    history: [
+      { role: 'user', text: 'Cómo sacar cita médica IMSS' },
+      { role: 'model', text: 'Necesitas tu CURP y NSS.' },
+    ],
+  });
+
+  assert.equal(liteBody.generationConfig.responseMimeType, 'application/json');
+  assert.ok(liteBody.generationConfig.responseJsonSchema);
+  assert.equal(liteBody.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
+  assert.equal('temperature' in liteBody.generationConfig, false);
+  assert.equal(liteBody.contents[liteBody.contents.length - 1].role, 'user');
+  assert.equal(liteBody.contents.length, 3);
+
+  const flash38Body = buildGenerateContentBody({
+    query: 'Cita IMSS',
+    searchResults: results,
+    model: 'gemini-3.8-flash',
+  });
+  assert.equal(flash38Body.generationConfig.thinkingConfig.thinkingLevel, 'low');
+});
+
+test('buildDocumentAnalysisBody encodes multimodal image payload and parses structured output', () => {
+  const extracted = extractBase64FromPickerAsset({
+    uri: 'data:image/png;base64,iVBORw0KGgo=',
+  });
+  assert.ok(extracted);
+  assert.equal(extracted.base64, 'iVBORw0KGgo=');
+  assert.equal(extracted.mimeType, 'image/png');
+
+  const body = buildDocumentAnalysisBody({
+    image: { base64: 'iVBORw0KGgo=', mimeType: 'image/png' },
+    model: 'gemini-3.5-flash-lite',
+    simplify: true,
+  });
+
+  const firstPart = body.contents[0].parts[0] as { inlineData?: { mimeType: string; data: string } };
+  assert.equal(firstPart.inlineData?.mimeType, 'image/png');
+  assert.equal(firstPart.inlineData?.data, 'iVBORw0KGgo=');
+
+  const parsed = parseVoiceGuideJson(
+    JSON.stringify({
+      title: 'Cita de Medicina Familiar',
+      greeting: 'Con gusto te leo tu hoja.',
+      simpleAnswer: 'Tu cita es el 10 de diciembre a las 9 de la mañana.',
+      documentDetected: 'Comprobante de cita IMSS',
+      importantDates: ['10 de diciembre, 09:00 hrs', 'Consultorio 4'],
+      requirements: ['Cartilla Nacional de Salud', 'INE'],
+      steps: [
+        {
+          order: 1,
+          title: 'Llegar temprano',
+          instruction: 'Preséntate 15 minutos antes en el consultorio 4.',
+          simpleExplanation: 'Llega un poquito antes de las 9 con tu cartilla.',
+        },
+      ],
+      closingTip: 'Lleva tu receta anterior si tomas medicamento.',
+    }),
+    { model: 'gemini-3.5-flash-lite', simplify: true }
+  );
+
+  assert.equal(parsed.source, 'gemini');
+  assert.equal(parsed.documentDetected, 'Comprobante de cita IMSS');
+  assert.equal(parsed.importantDates?.length, 2);
+  assert.equal(parsed.importantDates?.[0], '10 de diciembre, 09:00 hrs');
+  assert.equal(parsed.steps[0].instruction, 'Llega un poquito antes de las 9 con tu cartilla.');
+});
+
+test('analyzeDocumentWithGemini gracefully falls back when no API key is configured', async () => {
+  const response = await analyzeDocumentWithGemini({
+    image: { base64: 'AAAA', mimeType: 'image/jpeg' },
+    apiKey: '',
+  });
+  assert.equal(response.source, 'offline-local');
+  assert.ok(response.steps.length > 0);
+  assert.ok(response.diagnosticsNote?.includes('API Key'));
 });

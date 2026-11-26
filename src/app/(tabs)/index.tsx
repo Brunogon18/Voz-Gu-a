@@ -9,45 +9,91 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { NoticeDrawer } from '../../components/NoticeDrawer';
 import { Colors, Spacing, Typography } from '../../theme/tokens';
+import { pickDocumentImage, DocumentPickMode } from '../../services/documentPicker';
+import { kvStore } from '../../services/kvStore';
+import { setPendingDocument } from '../../services/pendingDocument';
+import { listenSpanishOnce, stopListeningSpanish } from '../../services/speechInput';
 import { speakSpanish, stopSpeaking } from '../../services/voiceService';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [query, setQuery] = useState('');
   const [feedback, setFeedback] = useState('');
 
-  const handleMicPress = () => {
+  const handleMicPress = async () => {
     if (isListening) {
       setIsListening(false);
-      void stopSpeaking();
+      await stopListeningSpanish();
+      await stopSpeaking();
+      setFeedback('Micrófono detenido.');
       return;
     }
+
     setIsListening(true);
-    setFeedback('Escuchando tu voz... Di tu consulta.');
-    void speakSpanish('¿En qué trámite te ayudo hoy? Puedes decir por ejemplo cita médica o beca.', {
-      onDone: () => setIsListening(false),
+    setFeedback('Escuchando tu voz... Di qué trámite necesitas.');
+    await stopSpeaking();
+
+    const capture = await listenSpanishOnce();
+    setIsListening(false);
+    setFeedback(capture.note);
+
+    if (capture.status === 'recognized' && capture.transcript) {
+      router.push({
+        pathname: '/(tabs)/conversacion',
+        params: { prompt: capture.transcript, reqId: String(Date.now()) },
+      });
+      return;
+    }
+
+    const settings = kvStore.getSettings();
+    void speakSpanish(capture.note, { rate: settings.speechRate });
+  };
+
+  const handleScanDocument = async (mode: DocumentPickMode) => {
+    setFeedback(
+      mode === 'camera'
+        ? 'Abriendo cámara para leer tu documento con Gemini...'
+        : 'Abriendo galería para elegir una imagen...'
+    );
+    const picked = await pickDocumentImage(mode);
+    if (picked.status === 'cancelled') {
+      setFeedback('');
+      return;
+    }
+    if (picked.status !== 'picked' || !picked.image) {
+      setFeedback(picked.message ?? 'No se pudo cargar la imagen.');
+      return;
+    }
+
+    const scanId = setPendingDocument(picked.image);
+    setFeedback('Documento listo. Analizando con Gemini AI...');
+    router.push({
+      pathname: '/(tabs)/conversacion',
+      params: { scanId },
     });
   };
 
   const handleSendText = () => {
     const clean = query.trim();
     if (!clean) return;
+    setQuery('');
     router.push({
       pathname: '/(tabs)/conversacion',
-      params: { prompt: clean },
+      params: { prompt: clean, reqId: String(Date.now()) },
     });
   };
 
   const handleCategoryPress = (category: string, example: string) => {
     router.push({
       pathname: '/(tabs)/conversacion',
-      params: { category, prompt: example },
+      params: { category, prompt: example, reqId: String(Date.now()) },
     });
   };
 
@@ -62,14 +108,14 @@ export default function HomeScreen() {
         {/* Etiqueta informativa Red Mesh */}
         <View style={styles.meshPill}>
           <View style={styles.pulseDot} />
-          <Text style={styles.meshPillText}>Funcionando sin internet vía Red Mesh BLE</Text>
+          <Text style={styles.meshPillText}>Funcionando sin internet vía catálogo local y Red Mesh</Text>
         </View>
 
         {/* Título de bienvenida */}
         <View style={styles.titleSection}>
           <Text style={styles.mainTitle}>¿En qué trámite te ayudo hoy?</Text>
           <Text style={styles.subTitle}>
-            Toca el micrófono para hablar o elige una categoría.
+            Toca el micrófono para hablar, toma foto a un papel oficial o elige una categoría.
           </Text>
         </View>
 
@@ -79,7 +125,8 @@ export default function HomeScreen() {
           <View style={styles.waveInner} />
           <Pressable
             style={[styles.micButton, isListening && styles.micButtonActive]}
-            onPress={handleMicPress}
+            onPress={() => void handleMicPress()}
+            accessibilityRole="button"
             accessibilityLabel={isListening ? 'Detener micrófono' : 'Toca para hablar'}
           >
             <Ionicons
@@ -100,6 +147,62 @@ export default function HomeScreen() {
           )}
         </View>
 
+        {/* Tarjeta destacada: Lectura de documentos con Gemini Vision */}
+        <View style={styles.visionCard}>
+          <View style={styles.visionHeader}>
+            <View style={styles.visionIconBox}>
+              <Ionicons name="sparkles" size={24} color={Colors.onPrimary} />
+            </View>
+            <View style={styles.visionHeaderText}>
+              <Text style={styles.visionTitle}>Leer documento o aviso con foto</Text>
+              <Text style={styles.visionSubtitle}>
+                Gemini analiza recetas, citas, volantes o convocatorias y te los explica con voz clara.
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.visionActions}>
+            {Platform.OS !== 'web' ? (
+              <Pressable
+                style={styles.visionPrimaryBtn}
+                onPress={() => void handleScanDocument('camera')}
+                accessibilityRole="button"
+                accessibilityLabel="Tomar foto de documento"
+              >
+                <Ionicons name="camera" size={20} color={Colors.onPrimary} />
+                <Text style={styles.visionPrimaryText}>Tomar foto</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              style={Platform.OS === 'web' ? styles.visionPrimaryBtn : styles.visionSecondaryBtn}
+              onPress={() => void handleScanDocument('library')}
+              accessibilityRole="button"
+              accessibilityLabel="Elegir imagen de documento"
+            >
+              <Ionicons
+                name="image-outline"
+                size={20}
+                color={Platform.OS === 'web' ? Colors.onPrimary : Colors.primary}
+              />
+              <Text
+                style={
+                  Platform.OS === 'web' ? styles.visionPrimaryText : styles.visionSecondaryText
+                }
+              >
+                {Platform.OS === 'web' ? 'Subir foto de documento' : 'Galería'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {feedback ? (
+          <View style={styles.feedbackBanner}>
+            <Ionicons name="information-circle" size={20} color={Colors.secondary} />
+            <Text style={styles.feedbackText}>{feedback}</Text>
+          </View>
+        ) : null}
+
         {/* Categorías rápidas */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Categorías rápidas</Text>
@@ -110,6 +213,7 @@ export default function HomeScreen() {
           <Pressable
             style={styles.categoryCard}
             onPress={() => handleCategoryPress('salud', 'Quiero sacar una cita médica en el IMSS')}
+            accessibilityRole="button"
           >
             <View style={[styles.catIconBox, { backgroundColor: Colors.secondaryContainer }]}>
               <Ionicons name="medical" size={30} color={Colors.onSecondaryContainer} />
@@ -124,7 +228,13 @@ export default function HomeScreen() {
           {/* Educación */}
           <Pressable
             style={styles.categoryCard}
-            onPress={() => handleCategoryPress('educacion', 'Cómo tramitar constancia de estudios o certificado SEP')}
+            onPress={() =>
+              handleCategoryPress(
+                'educacion',
+                'Cómo tramitar constancia de estudios o certificado SEP'
+              )
+            }
+            accessibilityRole="button"
           >
             <View style={[styles.catIconBox, { backgroundColor: Colors.primaryFixed }]}>
               <Ionicons name="school" size={30} color={Colors.onPrimaryFixed} />
@@ -139,7 +249,13 @@ export default function HomeScreen() {
           {/* Becas */}
           <Pressable
             style={styles.categoryCard}
-            onPress={() => handleCategoryPress('becas', 'Quiero información sobre la beca Benito Juárez o Rita Cetina')}
+            onPress={() =>
+              handleCategoryPress(
+                'becas',
+                'Quiero información sobre la beca Benito Juárez o Rita Cetina'
+              )
+            }
+            accessibilityRole="button"
           >
             <View style={[styles.catIconBox, { backgroundColor: Colors.tertiaryFixed }]}>
               <Ionicons name="ribbon" size={30} color={Colors.onTertiaryFixedVariant} />
@@ -163,16 +279,17 @@ export default function HomeScreen() {
               placeholder="Escribe tu duda o trámite..."
               placeholderTextColor={Colors.onSurfaceVariant}
               onSubmitEditing={handleSendText}
+              returnKeyType="send"
             />
             <Pressable
               style={styles.sendButton}
               onPress={handleSendText}
+              accessibilityRole="button"
               accessibilityLabel="Enviar mensaje"
             >
               <Ionicons name="send" size={22} color={Colors.onPrimary} />
             </Pressable>
           </View>
-          {feedback ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
         </View>
       </ScrollView>
 
@@ -215,6 +332,7 @@ const styles = StyleSheet.create({
     ...Typography.labelSm,
     fontSize: 13,
     color: Colors.onSecondaryContainer,
+    flexShrink: 1,
   },
   titleSection: {
     gap: 4,
@@ -285,8 +403,93 @@ const styles = StyleSheet.create({
     ...Typography.labelSm,
     color: Colors.onSecondaryContainer,
   },
+  visionCard: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: Colors.secondary,
+    gap: 12,
+  },
+  visionHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  visionIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: Colors.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  visionHeaderText: {
+    flex: 1,
+    gap: 3,
+  },
+  visionTitle: {
+    ...Typography.headlineSm,
+    fontSize: 18,
+    color: Colors.primary,
+  },
+  visionSubtitle: {
+    ...Typography.bodySm,
+    color: Colors.onSurfaceVariant,
+  },
+  visionActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  visionPrimaryBtn: {
+    flex: 1.2,
+    minHeight: 56,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  visionPrimaryText: {
+    ...Typography.labelMd,
+    color: Colors.onPrimary,
+  },
+  visionSecondaryBtn: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 12,
+    backgroundColor: Colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  visionSecondaryText: {
+    ...Typography.labelMd,
+    color: Colors.primary,
+  },
+  feedbackBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.surfaceContainerLow,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+  },
+  feedbackText: {
+    ...Typography.bodySm,
+    color: Colors.onSurface,
+    flex: 1,
+  },
   sectionHeader: {
-    marginTop: 6,
+    marginTop: 4,
   },
   sectionTitle: {
     ...Typography.headlineSm,
@@ -326,7 +529,7 @@ const styles = StyleSheet.create({
   },
   textInputSection: {
     gap: 8,
-    marginTop: 10,
+    marginTop: 6,
   },
   inputLabel: {
     ...Typography.labelMd,
@@ -356,9 +559,5 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  feedbackText: {
-    ...Typography.bodySm,
-    color: Colors.secondary,
   },
 });

@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -9,55 +11,202 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { NoticeDrawer } from '../../components/NoticeDrawer';
 import { Colors, Spacing, Typography } from '../../theme/tokens';
 import { searchTramitesLocal } from '../../services/database';
-import { generateVoiceGuide } from '../../services/geminiService';
+import { DocumentPickMode, pickDocumentImage } from '../../services/documentPicker';
+import { analyzeDocumentWithGemini, generateVoiceGuide } from '../../services/geminiService';
 import { kvStore } from '../../services/kvStore';
+import { meshService } from '../../services/meshService';
+import { consumePendingDocument } from '../../services/pendingDocument';
+import { listenSpanishOnce, stopListeningSpanish } from '../../services/speechInput';
 import { buildSpeechScript, speakSpanish, stopSpeaking } from '../../services/voiceService';
-import { VoiceGuideResponse } from '../../types/vozGuia';
+import {
+  ConversationTurn,
+  DocumentImageInput,
+  VoiceGuideResponse,
+} from '../../types/vozGuia';
+
+const DEFAULT_PROMPT = 'Quiero saber cómo pedir una beca';
 
 export default function ConversacionScreen() {
-  const params = useLocalSearchParams<{ prompt?: string; category?: string }>();
+  const router = useRouter();
+  const params = useLocalSearchParams<{
+    prompt?: string;
+    category?: string;
+    reqId?: string;
+    scanId?: string;
+  }>();
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [inputText, setInputText] = useState('');
-  const [userQuery, setUserQuery] = useState(
-    params.prompt || 'Quiero saber cómo pedir una beca'
-  );
+  const [userQuery, setUserQuery] = useState(params.prompt || DEFAULT_PROMPT);
   const [guide, setGuide] = useState<VoiceGuideResponse | null>(null);
+  const [activeDocument, setActiveDocument] = useState<DocumentImageInput | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [voiceFeedback, setVoiceFeedback] = useState('');
 
-  const executeQuery = useCallback(async (queryText: string, simplify = false) => {
-    const clean = queryText.trim();
-    if (!clean) return;
-    setUserQuery(clean);
-    kvStore.pushRecentQuery(clean);
+  const historyRef = useRef<ConversationTurn[]>([]);
+  const lastRequestKeyRef = useRef<string>('');
 
-    const results = await searchTramitesLocal(clean, { limit: 2 });
+  const speakGuideResponse = useCallback(async (response: VoiceGuideResponse, simplify: boolean) => {
     const settings = kvStore.getSettings();
-
-    const generated = await generateVoiceGuide({
-      query: clean,
-      searchResults: results,
-      apiKey: settings.geminiApiKey,
-      model: settings.geminiModel,
-      simplify,
+    const script = buildSpeechScript(response, simplify);
+    setIsSpeaking(true);
+    await speakSpanish(script, {
+      rate: settings.speechRate,
+      onDone: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false),
     });
-
-    setGuide(generated);
   }, []);
 
+  const runTextQuery = useCallback(
+    async (queryText: string, options?: { simplify?: boolean; autoSpeak?: boolean }) => {
+      const clean = queryText.trim();
+      if (!clean) return;
+
+      const simplify = options?.simplify ?? false;
+      setIsLoading(true);
+      setUserQuery(clean);
+      setActiveDocument(null);
+      setVoiceFeedback('');
+      kvStore.pushRecentQuery(clean);
+
+      try {
+        const settings = kvStore.getSettings();
+        let results = await searchTramitesLocal(clean, { limit: 2 });
+        if (results.length === 0 && settings.meshEnabled) {
+          results = await meshService.queryAcrossMesh(clean);
+        }
+
+        const generated = await generateVoiceGuide({
+          query: clean,
+          searchResults: results,
+          apiKey: settings.geminiApiKey,
+          model: settings.geminiModel,
+          simplify,
+          history: historyRef.current,
+        });
+
+        historyRef.current = [
+          ...historyRef.current.slice(-4),
+          { role: 'user', text: clean },
+          { role: 'model', text: `${generated.title}: ${generated.simpleAnswer}` },
+        ];
+
+        setGuide(generated);
+
+        if (options?.autoSpeak) {
+          await speakGuideResponse(generated, simplify);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [speakGuideResponse]
+  );
+
+  const runDocumentAnalysis = useCallback(
+    async (
+      image: DocumentImageInput,
+      options?: { simplify?: boolean; autoSpeak?: boolean; label?: string }
+    ) => {
+      const simplify = options?.simplify ?? false;
+      setIsLoading(true);
+      setActiveDocument(image);
+      setUserQuery(options?.label ?? 'Foto de documento enviada para lectura con Gemini');
+      setVoiceFeedback('');
+
+      try {
+        const settings = kvStore.getSettings();
+        const generated = await analyzeDocumentWithGemini({
+          image,
+          apiKey: settings.geminiApiKey,
+          model: settings.geminiModel,
+          simplify,
+        });
+
+        historyRef.current = [
+          ...historyRef.current.slice(-4),
+          {
+            role: 'user',
+            text: image.prompt?.trim() || 'Envié una foto de un documento oficial para que me lo expliques.',
+          },
+          { role: 'model', text: `${generated.title}: ${generated.simpleAnswer}` },
+        ];
+
+        setGuide(generated);
+
+        if (options?.autoSpeak) {
+          await speakGuideResponse(generated, simplify);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [speakGuideResponse]
+  );
+
   useEffect(() => {
-    if (params.prompt) {
-      void executeQuery(params.prompt, false);
-    } else {
-      void executeQuery(userQuery, false);
-    }
-  }, [params.prompt, executeQuery, userQuery]);
+    const incomingScanId = typeof params.scanId === 'string' ? params.scanId : '';
+    const incomingPrompt = typeof params.prompt === 'string' ? params.prompt : '';
+    const incomingReqId = typeof params.reqId === 'string' ? params.reqId : '';
+
+    const requestKey = incomingScanId
+      ? `scan:${incomingScanId}`
+      : incomingPrompt
+      ? `prompt:${incomingPrompt}:${incomingReqId}`
+      : 'initial:default';
+
+    if (lastRequestKeyRef.current === requestKey) return;
+    lastRequestKeyRef.current = requestKey;
+
+    let cancelled = false;
+
+    void (async () => {
+      if (incomingScanId) {
+        const pendingImage = consumePendingDocument(incomingScanId);
+        if (pendingImage && !cancelled) {
+          await runDocumentAnalysis(pendingImage, { autoSpeak: true });
+          return;
+        }
+      }
+
+      const targetPrompt = incomingPrompt || DEFAULT_PROMPT;
+      const settings = kvStore.getSettings();
+      let results = await searchTramitesLocal(targetPrompt, { limit: 2 });
+      if (results.length === 0 && settings.meshEnabled) {
+        results = await meshService.queryAcrossMesh(targetPrompt);
+      }
+
+      const generated = await generateVoiceGuide({
+        query: targetPrompt,
+        searchResults: results,
+        apiKey: settings.geminiApiKey,
+        model: settings.geminiModel,
+        simplify: false,
+      });
+
+      if (cancelled) return;
+      kvStore.pushRecentQuery(targetPrompt);
+      historyRef.current = [
+        { role: 'user', text: targetPrompt },
+        { role: 'model', text: `${generated.title}: ${generated.simpleAnswer}` },
+      ];
+      setActiveDocument(null);
+      setUserQuery(targetPrompt);
+      setGuide(generated);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [params.prompt, params.reqId, params.scanId, runDocumentAnalysis]);
 
   const handleToggleListen = async () => {
     if (isSpeaking) {
@@ -66,25 +215,77 @@ export default function ConversacionScreen() {
       return;
     }
     if (!guide) return;
-    const script = buildSpeechScript(guide, false);
-    setIsSpeaking(true);
-    await speakSpanish(script, {
-      onDone: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
-    });
+    await speakGuideResponse(guide, false);
   };
 
-  const handleMicVoiceReply = () => {
+  const handleSimplify = () => {
+    if (activeDocument) {
+      void runDocumentAnalysis(activeDocument, {
+        simplify: true,
+        autoSpeak: true,
+        label: 'Explicación más sencilla de tu documento',
+      });
+      return;
+    }
+    void runTextQuery(userQuery, { simplify: true, autoSpeak: true });
+  };
+
+  const handleSendInput = () => {
+    const clean = inputText.trim();
+    if (!clean) return;
+    setInputText('');
+    void runTextQuery(clean, { simplify: false, autoSpeak: false });
+  };
+
+  const handleMicVoiceReply = async () => {
     if (isListening) {
       setIsListening(false);
-      void stopSpeaking();
+      await stopListeningSpanish();
+      await stopSpeaking();
       return;
     }
     setIsListening(true);
-    void speakSpanish('Te escucho. Di tu consulta o pregunta adicional.', {
-      onDone: () => setIsListening(false),
-    });
+    setVoiceFeedback('Escuchando tu pregunta...');
+    await stopSpeaking();
+
+    const capture = await listenSpanishOnce();
+    setIsListening(false);
+    setVoiceFeedback(capture.note);
+
+    if (capture.status === 'recognized' && capture.transcript) {
+      await runTextQuery(capture.transcript, { simplify: false, autoSpeak: true });
+    }
   };
+
+  const handlePickDocument = async (mode: DocumentPickMode) => {
+    setVoiceFeedback(
+      mode === 'camera' ? 'Abriendo cámara...' : 'Elige la foto de tu documento o aviso...'
+    );
+    const picked = await pickDocumentImage(mode);
+    if (picked.status === 'cancelled') {
+      setVoiceFeedback('');
+      return;
+    }
+    if (picked.status !== 'picked' || !picked.image) {
+      setVoiceFeedback(picked.message ?? 'No se pudo cargar la imagen.');
+      return;
+    }
+    const imageWithPrompt: DocumentImageInput = {
+      ...picked.image,
+      prompt: inputText.trim() || undefined,
+    };
+    if (inputText.trim()) {
+      setInputText('');
+    }
+    await runDocumentAnalysis(imageWithPrompt, { autoSpeak: true });
+  };
+
+  const sourceLabel =
+    guide?.source === 'gemini'
+      ? `Gemini AI · ${guide.modelUsed ?? 'gemini-3.5-flash-lite'}`
+      : guide?.source === 'mesh-peer'
+      ? 'Recibido vía Red Mesh'
+      : 'Guía Local Offline';
 
   return (
     <KeyboardAvoidingView
@@ -98,7 +299,9 @@ export default function ConversacionScreen() {
         <View style={styles.statusBanner}>
           <View style={styles.statusLeft}>
             <View style={styles.pulseDot} />
-            <Text style={styles.statusText}>Voz Guía lista para escucharte</Text>
+            <Text style={styles.statusText}>
+              {isLoading ? 'Analizando respuesta...' : 'Voz Guía lista para escucharte'}
+            </Text>
           </View>
           <Text style={styles.audioActiveText}>Audio activo</Text>
         </View>
@@ -108,6 +311,14 @@ export default function ConversacionScreen() {
           <View style={styles.userBubble}>
             <Text style={styles.userTag}>Tú</Text>
             <Text style={styles.userText}>{userQuery}</Text>
+            {activeDocument?.uri ? (
+              <Image
+                source={{ uri: activeDocument.uri }}
+                style={styles.documentPreview}
+                resizeMode="cover"
+                accessibilityLabel="Vista previa del documento escaneado"
+              />
+            ) : null}
           </View>
         </View>
 
@@ -116,14 +327,23 @@ export default function ConversacionScreen() {
           <View style={styles.agentHeader}>
             <View style={styles.agentTitleRow}>
               <View style={styles.agentAvatar}>
-                <Ionicons name="headset" size={20} color={Colors.onSecondaryContainer} />
+                <Ionicons
+                  name={guide?.source === 'gemini' ? 'sparkles' : 'headset'}
+                  size={20}
+                  color={Colors.onSecondaryContainer}
+                />
               </View>
-              <Text style={styles.agentName}>Voz Guía</Text>
+              <View>
+                <Text style={styles.agentName}>Voz Guía</Text>
+                <Text style={styles.sourceBadgeText}>{sourceLabel}</Text>
+              </View>
             </View>
 
             <Pressable
               style={[styles.listenBtn, isSpeaking && styles.listenBtnActive]}
-              onPress={handleToggleListen}
+              onPress={() => void handleToggleListen()}
+              accessibilityRole="button"
+              accessibilityLabel={isSpeaking ? 'Detener audio' : 'Escuchar respuesta'}
             >
               <Ionicons
                 name={isSpeaking ? 'stop-circle' : 'volume-high'}
@@ -136,49 +356,98 @@ export default function ConversacionScreen() {
                   isSpeaking && { color: Colors.onSecondaryContainer },
                 ]}
               >
-                {isSpeaking ? 'Detener audio' : 'Escuchar respuesta'}
+                {isSpeaking ? 'Detener' : 'Escuchar'}
               </Text>
             </Pressable>
           </View>
 
-          <Text style={styles.agentIntro}>
-            {guide?.simpleAnswer ||
-              'Con mucho gusto te acompaño. Tu trámite es más fácil si vamos paso a paso. Aquí tienes lo que necesitas hacer:'}
-          </Text>
+          {isLoading ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={styles.loadingText}>
+                {activeDocument
+                  ? 'Gemini está leyendo tu documento y preparando pasos sencillos...'
+                  : 'Preparando tu guía paso a paso...'}
+              </Text>
+            </View>
+          ) : (
+            <>
+              {guide?.title ? <Text style={styles.guideTitle}>{guide.title}</Text> : null}
 
-          {/* Pasos numerados */}
-          <View style={styles.stepsList}>
-            {guide?.steps && guide.steps.length > 0 ? (
-              guide.steps.map((step) => (
-                <View key={step.order} style={styles.stepItem}>
-                  <View style={styles.stepNumberBadge}>
-                    <Text style={styles.stepNumberText}>{step.order}</Text>
-                  </View>
-                  <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Paso {step.order}: {step.title}</Text>
-                    <Text style={styles.stepDetail}>{step.instruction}</Text>
-                  </View>
+              {guide?.documentDetected ? (
+                <View style={styles.detectedPill}>
+                  <Ionicons name="document-text-outline" size={16} color={Colors.primary} />
+                  <Text style={styles.detectedPillText}>
+                    Documento detectado: {guide.documentDetected}
+                  </Text>
                 </View>
-              ))
-            ) : (
-              <>
-                <View style={styles.stepItem}>
-                  <View style={styles.stepNumberBadge}><Text style={styles.stepNumberText}>1</Text></View>
-                  <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Paso 1: Identificación y requisitos</Text>
-                    <Text style={styles.stepDetail}>Ten a la mano tu CURP y comprobante vigente.</Text>
-                  </View>
+              ) : null}
+
+              <Text style={styles.agentIntro}>
+                {guide?.simpleAnswer ||
+                  'Con mucho gusto te acompaño. Tu trámite es más fácil si vamos paso a paso.'}
+              </Text>
+
+              {guide?.importantDates && guide.importantDates.length > 0 ? (
+                <View style={styles.infoBox}>
+                  <Text style={styles.infoBoxTitle}>Fechas y datos clave:</Text>
+                  {guide.importantDates.map((item, idx) => (
+                    <Text key={`${item}-${idx}`} style={styles.infoBoxItem}>
+                      • {item}
+                    </Text>
+                  ))}
                 </View>
-                <View style={styles.stepItem}>
-                  <View style={styles.stepNumberBadge}><Text style={styles.stepNumberText}>2</Text></View>
-                  <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Paso 2: Registro en módulo o línea</Text>
-                    <Text style={styles.stepDetail}>Acude a la ventanilla oficial o ingresa tu solicitud.</Text>
-                  </View>
+              ) : null}
+
+              {guide?.requirements && guide.requirements.length > 0 ? (
+                <View style={styles.requirementsBox}>
+                  <Text style={styles.requirementsTitle}>Documentos / requisitos:</Text>
+                  {guide.requirements.map((req, idx) => (
+                    <Text key={`${req}-${idx}`} style={styles.requirementItem}>
+                      • {req}
+                    </Text>
+                  ))}
                 </View>
-              </>
-            )}
-          </View>
+              ) : null}
+
+              {/* Pasos numerados */}
+              {guide?.steps && guide.steps.length > 0 ? (
+                <View style={styles.stepsList}>
+                  {guide.steps.map((step) => (
+                    <View key={`${step.order}-${step.title}`} style={styles.stepItem}>
+                      <View style={styles.stepNumberBadge}>
+                        <Text style={styles.stepNumberText}>{step.order}</Text>
+                      </View>
+                      <View style={styles.stepContent}>
+                        <Text style={styles.stepTitle}>
+                          Paso {step.order}: {step.title}
+                        </Text>
+                        <Text style={styles.stepDetail}>{step.instruction}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {guide?.closingTip ? (
+                <View style={styles.tipBox}>
+                  <Ionicons name="checkmark-circle-outline" size={18} color={Colors.secondary} />
+                  <Text style={styles.tipText}>{guide.closingTip}</Text>
+                </View>
+              ) : null}
+
+              {guide?.diagnosticsNote ? (
+                <Pressable
+                  style={styles.diagnosticsRow}
+                  onPress={() => router.push('/(tabs)/mesh')}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="settings-outline" size={15} color={Colors.onSurfaceVariant} />
+                  <Text style={styles.diagnosticsText}>{guide.diagnosticsNote}</Text>
+                </Pressable>
+              ) : null}
+            </>
+          )}
         </View>
 
         {/* Botones de acción rápida: Repite por favor / Explícalo más sencillo */}
@@ -187,14 +456,10 @@ export default function ConversacionScreen() {
             style={styles.quickActionBtn}
             onPress={() => {
               if (guide) {
-                const script = buildSpeechScript(guide, false);
-                setIsSpeaking(true);
-                void speakSpanish(script, {
-                  onDone: () => setIsSpeaking(false),
-                  onError: () => setIsSpeaking(false),
-                });
+                void speakGuideResponse(guide, false);
               }
             }}
+            accessibilityRole="button"
           >
             <Ionicons name="refresh" size={20} color={Colors.primary} />
             <Text style={styles.quickActionText}>Repite por favor</Text>
@@ -202,47 +467,66 @@ export default function ConversacionScreen() {
 
           <Pressable
             style={styles.quickActionBtn}
-            onPress={() => {
-              void executeQuery(userQuery, true);
-            }}
+            onPress={handleSimplify}
+            accessibilityRole="button"
           >
             <Ionicons name="bulb-outline" size={20} color={Colors.primary} />
             <Text style={styles.quickActionText}>Explícalo más sencillo</Text>
           </Pressable>
         </View>
 
-        {/* Input para mensaje nuevo y botón de micrófono para responder */}
+        {/* Input para mensaje nuevo, foto de documento y botón de micrófono */}
         <View style={styles.bottomBar}>
           <View style={styles.chatInputRow}>
             <TextInput
               style={styles.chatInput}
               value={inputText}
               onChangeText={setInputText}
-              placeholder="Escribe tu duda aquí..."
+              placeholder="Escribe tu duda o seguimiento..."
               placeholderTextColor={Colors.onSurfaceVariant}
-              onSubmitEditing={() => {
-                if (inputText.trim()) {
-                  void executeQuery(inputText.trim(), false);
-                  setInputText('');
-                }
-              }}
+              onSubmitEditing={handleSendInput}
+              returnKeyType="send"
             />
             <Pressable
               style={styles.chatSendBtn}
-              onPress={() => {
-                if (inputText.trim()) {
-                  void executeQuery(inputText.trim(), false);
-                  setInputText('');
-                }
-              }}
+              onPress={handleSendInput}
+              accessibilityRole="button"
+              accessibilityLabel="Enviar pregunta"
             >
               <Ionicons name="send" size={20} color={Colors.onPrimary} />
             </Pressable>
           </View>
 
+          <View style={styles.mediaActionsRow}>
+            {Platform.OS !== 'web' ? (
+              <Pressable
+                style={styles.docActionBtn}
+                onPress={() => void handlePickDocument('camera')}
+                accessibilityRole="button"
+                accessibilityLabel="Tomar foto a documento para leer con Gemini"
+              >
+                <Ionicons name="camera-outline" size={20} color={Colors.primary} />
+                <Text style={styles.docActionText}>Foto con cámara</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              style={styles.docActionBtn}
+              onPress={() => void handlePickDocument('library')}
+              accessibilityRole="button"
+              accessibilityLabel="Elegir foto de documento para leer con Gemini"
+            >
+              <Ionicons name="document-attach-outline" size={20} color={Colors.primary} />
+              <Text style={styles.docActionText}>
+                {Platform.OS === 'web' ? 'Subir foto de documento (Gemini)' : 'Foto de galería'}
+              </Text>
+            </Pressable>
+          </View>
+
           <Pressable
             style={[styles.voiceReplyBtn, isListening && styles.voiceReplyBtnActive]}
-            onPress={handleMicVoiceReply}
+            onPress={() => void handleMicVoiceReply()}
+            accessibilityRole="button"
           >
             <Ionicons
               name={isListening ? 'stop' : 'mic'}
@@ -253,6 +537,8 @@ export default function ConversacionScreen() {
               {isListening ? 'Escuchando tu respuesta...' : 'Toca para responder por voz'}
             </Text>
           </Pressable>
+
+          {voiceFeedback ? <Text style={styles.voiceFeedbackText}>{voiceFeedback}</Text> : null}
         </View>
       </ScrollView>
 
@@ -308,22 +594,28 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   userBubble: {
-    maxWidth: '85%',
+    maxWidth: '88%',
     backgroundColor: Colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 16,
     borderTopRightRadius: 4,
+    gap: 8,
   },
   userTag: {
     ...Typography.labelSm,
     fontSize: 12,
     color: Colors.primaryFixed,
-    marginBottom: 2,
   },
   userText: {
     ...Typography.bodyLg,
     color: Colors.onPrimary,
+  },
+  documentPreview: {
+    width: 220,
+    height: 140,
+    borderRadius: 10,
+    backgroundColor: Colors.primaryContainer,
   },
   agentCard: {
     backgroundColor: Colors.surfaceContainerLowest,
@@ -338,16 +630,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
   agentTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
   },
   agentAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: Colors.secondaryContainer,
     alignItems: 'center',
     justifyContent: 'center',
@@ -357,13 +651,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: Colors.primary,
   },
+  sourceBadgeText: {
+    ...Typography.bodySm,
+    fontSize: 12,
+    color: Colors.secondary,
+    fontWeight: '700',
+  },
   listenBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     backgroundColor: Colors.primaryFixed,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 99,
   },
   listenBtnActive: {
@@ -374,10 +674,68 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.onPrimaryFixed,
   },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+  },
+  loadingText: {
+    ...Typography.bodyMd,
+    color: Colors.onSurfaceVariant,
+    flex: 1,
+  },
+  guideTitle: {
+    ...Typography.headlineSm,
+    color: Colors.primary,
+  },
+  detectedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.primaryFixed,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  detectedPillText: {
+    ...Typography.labelSm,
+    fontSize: 13,
+    color: Colors.onPrimaryFixed,
+  },
   agentIntro: {
     ...Typography.bodyMd,
     color: Colors.onSurface,
-    lineHeight: 22,
+    lineHeight: 24,
+  },
+  infoBox: {
+    backgroundColor: Colors.tertiaryFixed,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+  },
+  infoBoxTitle: {
+    ...Typography.labelMd,
+    color: Colors.onTertiaryFixedVariant,
+  },
+  infoBoxItem: {
+    ...Typography.bodySm,
+    color: Colors.tertiary,
+  },
+  requirementsBox: {
+    backgroundColor: Colors.surfaceContainerLow,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+  },
+  requirementsTitle: {
+    ...Typography.labelMd,
+    color: Colors.primary,
+  },
+  requirementItem: {
+    ...Typography.bodyMd,
+    color: Colors.onSurface,
   },
   stepsList: {
     gap: 8,
@@ -414,13 +772,38 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
     marginTop: 2,
   },
+  tipBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: Colors.surfaceContainer,
+    borderRadius: 12,
+    padding: 12,
+  },
+  tipText: {
+    ...Typography.bodySm,
+    color: Colors.onSurface,
+    flex: 1,
+  },
+  diagnosticsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 4,
+  },
+  diagnosticsText: {
+    ...Typography.bodySm,
+    fontSize: 12,
+    color: Colors.onSurfaceVariant,
+    flex: 1,
+  },
   quickActionsRow: {
     flexDirection: 'row',
     gap: 10,
   },
   quickActionBtn: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -465,9 +848,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  mediaActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  docActionBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: Colors.surfaceContainerLow,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  docActionText: {
+    ...Typography.labelSm,
+    color: Colors.primary,
+  },
   voiceReplyBtn: {
     width: '100%',
-    minHeight: 54,
+    minHeight: 56,
     borderRadius: 14,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
@@ -482,5 +886,10 @@ const styles = StyleSheet.create({
     ...Typography.labelLg,
     fontSize: 16,
     color: Colors.onPrimary,
+  },
+  voiceFeedbackText: {
+    ...Typography.bodySm,
+    color: Colors.onSurfaceVariant,
+    textAlign: 'center',
   },
 });

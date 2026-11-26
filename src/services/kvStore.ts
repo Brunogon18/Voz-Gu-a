@@ -1,9 +1,10 @@
 import Storage from 'expo-sqlite/kv-store';
 import { AppSettings } from '../types/vozGuia';
+import { DEFAULT_GEMINI_MODEL, resolveGeminiModel } from './geminiService';
 
 const DEFAULT_SETTINGS: AppSettings = {
   geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
-  geminiModel: 'gemini-2.5-flash',
+  geminiModel: DEFAULT_GEMINI_MODEL,
   speechRate: 0.92,
   largeTextMode: true,
   meshEnabled: true,
@@ -71,6 +72,7 @@ export const kvStore = {
         ...DEFAULT_SETTINGS,
         ...parsed,
         geminiApiKey: parsed.geminiApiKey ?? DEFAULT_SETTINGS.geminiApiKey,
+        geminiModel: resolveGeminiModel(parsed.geminiModel),
       };
     } catch {
       return { ...DEFAULT_SETTINGS };
@@ -78,7 +80,11 @@ export const kvStore = {
   },
 
   saveSettings(partial: Partial<AppSettings>): AppSettings {
-    const merged = { ...this.getSettings(), ...partial };
+    const merged: AppSettings = {
+      ...this.getSettings(),
+      ...partial,
+      geminiModel: resolveGeminiModel(partial.geminiModel ?? this.getSettings().geminiModel),
+    };
     setSyncRaw(SETTINGS_KEY, JSON.stringify(merged));
     return merged;
   },

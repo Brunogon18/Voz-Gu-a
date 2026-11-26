@@ -4,6 +4,10 @@ import { VoiceGuideResponse } from '../types/vozGuia';
 export function buildSpeechScript(guide: VoiceGuideResponse, simplify = false): string {
   const parts: string[] = [guide.greeting, guide.simpleAnswer];
 
+  if (guide.importantDates && guide.importantDates.length > 0) {
+    parts.push(`Datos y fechas importantes: ${guide.importantDates.join('. ')}.`);
+  }
+
   if (guide.requirements.length > 0) {
     parts.push(`Vas a necesitar: ${guide.requirements.join('. ')}.`);
   }

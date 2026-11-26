@@ -66,6 +66,18 @@ export interface MeshStats {
   connectedPeers: number;
 }
 
+export interface ConversationTurn {
+  role: 'user' | 'model';
+  text: string;
+}
+
+export interface DocumentImageInput {
+  base64: string;
+  mimeType: string;
+  uri?: string;
+  prompt?: string;
+}
+
 export interface VoiceGuideResponse {
   title: string;
   greeting: string;
@@ -76,6 +88,9 @@ export interface VoiceGuideResponse {
   source: 'gemini' | 'offline-local' | 'mesh-peer';
   modelUsed?: string;
   hopCount?: number;
+  diagnosticsNote?: string;
+  documentDetected?: string;
+  importantDates?: string[];
 }
 
 export interface AppSettings {

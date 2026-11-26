@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -8,10 +8,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { AppHeader } from '../../components/AppHeader';
 import { NoticeDrawer } from '../../components/NoticeDrawer';
 import { Colors, Spacing, Typography } from '../../theme/tokens';
+import { kvStore } from '../../services/kvStore';
 import { speakSpanish } from '../../services/voiceService';
 
 interface HistoryItem {
@@ -58,9 +59,17 @@ const HISTORY_DATA: HistoryItem[] = [
 ];
 
 export default function HistorialScreen() {
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<'todos' | 'becas' | 'salud' | 'educacion'>('todos');
   const [modalItem, setModalItem] = useState<HistoryItem | null>(null);
+  const [recentQueries, setRecentQueries] = useState<string[]>(() => kvStore.getRecentQueries());
+
+  useFocusEffect(
+    useCallback(() => {
+      setRecentQueries(kvStore.getRecentQueries());
+    }, [])
+  );
 
   const filteredItems = HISTORY_DATA.filter((item) => {
     if (selectedFilter === 'todos') return true;
@@ -82,6 +91,36 @@ export default function HistorialScreen() {
             </Text>
           </View>
         </View>
+
+        {recentQueries.length > 0 ? (
+          <View style={styles.recentSection}>
+            <Text style={styles.recentHeading}>Consultas recientes</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsRow}
+            >
+              {recentQueries.map((recent) => (
+                <Pressable
+                  key={recent}
+                  style={styles.recentChip}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(tabs)/conversacion',
+                      params: { prompt: recent, reqId: String(Date.now()) },
+                    })
+                  }
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="time-outline" size={15} color={Colors.primary} />
+                  <Text style={styles.recentChipText} numberOfLines={1}>
+                    {recent}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
 
         {/* Chips de filtro */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
@@ -219,7 +258,12 @@ export default function HistorialScreen() {
       </ScrollView>
 
       {/* Modal con detalle del trámite */}
-      <Modal visible={Boolean(modalItem)} transparent animationType="fade">
+      <Modal
+        visible={Boolean(modalItem)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalItem(null)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{modalItem?.title}</Text>
@@ -246,7 +290,7 @@ export default function HistorialScreen() {
                   if (query) {
                     router.push({
                       pathname: '/(tabs)/conversacion',
-                      params: { prompt: query },
+                      params: { prompt: query, reqId: String(Date.now()) },
                     });
                   }
                 }}
@@ -303,6 +347,28 @@ const styles = StyleSheet.create({
   offlineText: {
     ...Typography.bodySm,
     color: Colors.onSurfaceVariant,
+  },
+  recentSection: {
+    gap: 6,
+  },
+  recentHeading: {
+    ...Typography.labelMd,
+    color: Colors.primary,
+  },
+  recentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    maxWidth: 240,
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderRadius: 99,
+    backgroundColor: Colors.primaryFixed,
+  },
+  recentChipText: {
+    ...Typography.labelSm,
+    color: Colors.onPrimaryFixed,
+    flexShrink: 1,
   },
   chipsRow: {
     gap: 8,
