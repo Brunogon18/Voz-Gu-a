@@ -14,6 +14,10 @@ import {
   resolveGeminiModel,
 } from '../src/services/geminiService';
 import { ControlledFloodingRouter } from '../src/services/meshRouter';
+import {
+  detectSpeechControlCommand,
+  splitTextIntoSpeechChunks,
+} from '../src/services/speechUtils';
 import { createVectorIndex, searchVectorIndex } from '../src/services/vectorSearch';
 import {
   extractReadablePageFromHtml,
@@ -218,3 +222,35 @@ test('webTramiteService parses official HTML page into functional offline guide 
   });
   assert.ok('tools' in urlContextBody);
 });
+
+test('splitTextIntoSpeechChunks divides long Spanish scripts into pause-friendly chunks', () => {
+  const longText =
+    'Hola, con gusto te ayudo. Primero reúne tu identificación oficial vigente y tu comprobante de domicilio reciente. ' +
+    'Después acude al módulo más cercano de lunes a viernes de ocho de la mañana a dos de la tarde para entregar tus copias y recibir tu folio de seguimiento oficial sin ningún costo adicional en ventanilla. ' +
+    'Guarda tu comprobante.';
+
+  const chunks = splitTextIntoSpeechChunks(longText, 140);
+  assert.ok(chunks.length >= 3);
+  for (const chunk of chunks) {
+    assert.ok(chunk.length > 0 && chunk.length <= 140);
+  }
+  assert.equal(splitTextIntoSpeechChunks('   ').length, 0);
+});
+
+test('detectSpeechControlCommand recognizes pause/stop/resume without intercepting real queries', () => {
+  assert.equal(detectSpeechControlCommand('pausa'), 'pause');
+  assert.equal(detectSpeechControlCommand('Pausar el audio por favor'), 'pause');
+  assert.equal(detectSpeechControlCommand('me pause'), 'pause');
+  assert.equal(detectSpeechControlCommand('Detente'), 'stop');
+  assert.equal(detectSpeechControlCommand('silencio por favor'), 'stop');
+  assert.equal(detectSpeechControlCommand('cállate'), 'stop');
+  assert.equal(detectSpeechControlCommand('deja de hablar'), 'stop');
+  assert.equal(detectSpeechControlCommand('reanudar'), 'resume');
+  assert.equal(detectSpeechControlCommand('continúa'), 'resume');
+
+  // Real trámite queries must NOT be intercepted
+  assert.equal(detectSpeechControlCommand('Quiero saber cómo pedir una beca'), null);
+  assert.equal(detectSpeechControlCommand('Cita para el doctor en el IMSS'), null);
+  assert.equal(detectSpeechControlCommand('Requisitos para la pensión del bienestar'), null);
+});
+

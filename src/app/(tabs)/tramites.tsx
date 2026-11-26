@@ -2,8 +2,10 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AccessibleButton } from '../../components/AccessibleButton';
+import { useSpeechStatus } from '../../hooks/useSpeechStatus';
 import { isSqliteVecActive, searchTramitesLocal } from '../../services/database';
-import { speakSpanish } from '../../services/voiceService';
+import { kvStore } from '../../services/kvStore';
+import { pauseSpeaking, resumeSpeaking, speakSpanish } from '../../services/voiceService';
 import { SearchResult, TramiteCategory } from '../../types/vozGuia';
 
 const CATEGORIES: { key: 'all' | TramiteCategory; label: string }[] = [
@@ -15,6 +17,7 @@ const CATEGORIES: { key: 'all' | TramiteCategory; label: string }[] = [
 
 export default function TramitesCatalogScreen() {
   const router = useRouter();
+  const speech = useSpeechStatus();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<'all' | TramiteCategory>('all');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -71,37 +74,55 @@ export default function TramitesCatalogScreen() {
       </View>
 
       <View style={styles.list}>
-        {results.map(({ tramite, score }) => (
-          <View key={tramite.id} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.categoryTag}>{tramite.category.toUpperCase()}</Text>
-              {query.trim() ? (
-                <Text style={styles.scoreText}>Similitud: {Math.round(score * 100)}%</Text>
-              ) : null}
-            </View>
-            <Text style={styles.cardTitle}>{tramite.title}</Text>
-            <Text style={styles.institution}>{tramite.institution}</Text>
-            <Text style={styles.summary}>{tramite.simpleSummary}</Text>
+        {results.map(({ tramite, score }) => {
+          const sourceId = `tramite-${tramite.id}`;
+          const isSpeakingThis = speech.sourceId === sourceId && speech.status === 'speaking';
+          const isPausedThis = speech.sourceId === sourceId && speech.status === 'paused';
+          return (
+            <View key={tramite.id} style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.categoryTag}>{tramite.category.toUpperCase()}</Text>
+                {query.trim() ? (
+                  <Text style={styles.scoreText}>Similitud: {Math.round(score * 100)}%</Text>
+                ) : null}
+              </View>
+              <Text style={styles.cardTitle}>{tramite.title}</Text>
+              <Text style={styles.institution}>{tramite.institution}</Text>
+              <Text style={styles.summary}>{tramite.simpleSummary}</Text>
 
-            <View style={styles.actions}>
-              <AccessibleButton
-                label="Abrir guía paso a paso"
-                onPress={() =>
-                  router.push({ pathname: '/(tabs)', params: { tramiteId: tramite.id } })
-                }
-                style={styles.flexBtn}
-              />
-              <AccessibleButton
-                label="Escuchar"
-                variant="outline"
-                onPress={() =>
-                  void speakSpanish(`${tramite.title}. ${tramite.simpleSummary}`)
-                }
-                style={styles.listenBtn}
-              />
+              <View style={styles.actions}>
+                <AccessibleButton
+                  label="Abrir guía paso a paso"
+                  onPress={() =>
+                    router.push({ pathname: '/(tabs)', params: { tramiteId: tramite.id } })
+                  }
+                  style={styles.flexBtn}
+                />
+                <AccessibleButton
+                  label={isSpeakingThis ? 'Pausar' : isPausedThis ? 'Reanudar' : 'Escuchar'}
+                  variant={isSpeakingThis ? 'danger' : 'outline'}
+                  onPress={() => {
+                    if (isSpeakingThis) {
+                      void pauseSpeaking();
+                      return;
+                    }
+                    if (isPausedThis) {
+                      void resumeSpeaking();
+                      return;
+                    }
+                    const settings = kvStore.getSettings();
+                    void speakSpanish(`${tramite.title}. ${tramite.simpleSummary}`, {
+                      rate: settings.speechRate,
+                      sourceId,
+                      label: tramite.title,
+                    });
+                  }}
+                  style={styles.listenBtn}
+                />
+              </View>
             </View>
-          </View>
-        ))}
+          );
+        })}
 
         {results.length === 0 && (
           <View style={styles.emptyBox}>

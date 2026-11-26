@@ -2,7 +2,15 @@ import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Typography } from '../theme/tokens';
-import { speakSpanish } from '../services/voiceService';
+import { useSpeechStatus } from '../hooks/useSpeechStatus';
+import { kvStore } from '../services/kvStore';
+import {
+  pauseSpeaking,
+  resumeSpeaking,
+  speakSpanish,
+  stopSpeaking,
+} from '../services/voiceService';
+import { SpeechControlBar } from './SpeechControlBar';
 
 interface NoticeDrawerProps {
   visible: boolean;
@@ -10,7 +18,81 @@ interface NoticeDrawerProps {
   meshNodesCount?: number;
 }
 
+const NOTICE_BECAS_ID = 'notice-becas-2025';
+const NOTICE_BECAS_TEXT =
+  'Aviso de becas: Convocatoria de Becas 2025 abierta. Ya puedes consultar los requisitos y fechas de registro para apoyo educativo.';
+
+const NOTICE_SALUD_ID = 'notice-salud-jornada';
+const NOTICE_SALUD_TEXT =
+  'Aviso de salud: Jornada de vacunación y citas médicas en Centro de Salud. Atención prioritaria para adultos mayores de 8 a 14 horas.';
+
 export function NoticeDrawer({ visible, onClose, meshNodesCount = 3 }: NoticeDrawerProps) {
+  const speech = useSpeechStatus();
+
+  const handleNoticeAudio = (id: string, label: string, text: string) => {
+    const isThisActive = speech.sourceId === id && speech.status !== 'idle';
+    if (isThisActive && speech.status === 'speaking') {
+      void pauseSpeaking();
+      return;
+    }
+    if (isThisActive && speech.status === 'paused') {
+      void resumeSpeaking();
+      return;
+    }
+    const settings = kvStore.getSettings();
+    void speakSpanish(text, {
+      rate: settings.speechRate,
+      sourceId: id,
+      label,
+    });
+  };
+
+  const renderNoticeAudioControls = (id: string, label: string, text: string) => {
+    const isThisSpeaking = speech.sourceId === id && speech.status === 'speaking';
+    const isThisPaused = speech.sourceId === id && speech.status === 'paused';
+
+    return (
+      <View style={styles.noticeAudioRow}>
+        <Pressable
+          style={[
+            styles.listenNoticeBtn,
+            isThisSpeaking && styles.listenNoticeBtnActive,
+          ]}
+          onPress={() => handleNoticeAudio(id, label, text)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            isThisSpeaking
+              ? `Pausar ${label}`
+              : isThisPaused
+              ? `Reanudar ${label}`
+              : `Escuchar ${label}`
+          }
+        >
+          <Ionicons
+            name={isThisSpeaking ? 'pause' : isThisPaused ? 'play' : 'volume-high'}
+            size={20}
+            color={Colors.onPrimary}
+          />
+          <Text style={styles.listenNoticeText}>
+            {isThisSpeaking ? 'Pausar' : isThisPaused ? 'Reanudar' : 'Escuchar aviso'}
+          </Text>
+        </Pressable>
+
+        {(isThisSpeaking || isThisPaused) && (
+          <Pressable
+            style={styles.stopNoticeBtn}
+            onPress={() => void stopSpeaking()}
+            accessibilityRole="button"
+            accessibilityLabel="Detener audio"
+          >
+            <Ionicons name="stop" size={20} color={Colors.onError} />
+            <Text style={styles.stopNoticeText}>Detener</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -40,6 +122,9 @@ export function NoticeDrawer({ visible, onClose, meshNodesCount = 3 }: NoticeDra
             </View>
           </View>
 
+          {/* Controles globales visibles también dentro del modal */}
+          <SpeechControlBar variant="inline" />
+
           <ScrollView style={styles.scrollList} contentContainerStyle={styles.scrollContent}>
             {/* Aviso 1: Becas */}
             <View style={styles.noticeCard}>
@@ -58,17 +143,11 @@ export function NoticeDrawer({ visible, onClose, meshNodesCount = 3 }: NoticeDra
                 <Ionicons name="git-network-outline" size={16} color={Colors.secondary} />
                 <Text style={styles.meshOriginText}>Recibido vía Red Mesh</Text>
               </View>
-              <Pressable
-                style={styles.listenNoticeBtn}
-                onPress={() => {
-                  void speakSpanish(
-                    'Aviso de becas: Convocatoria de Becas 2025 abierta. Ya puedes consultar los requisitos y fechas de registro para apoyo educativo.'
-                  );
-                }}
-              >
-                <Ionicons name="volume-high" size={20} color={Colors.onPrimary} />
-                <Text style={styles.listenNoticeText}>Escuchar aviso</Text>
-              </Pressable>
+              {renderNoticeAudioControls(
+                NOTICE_BECAS_ID,
+                'Aviso de Becas 2025',
+                NOTICE_BECAS_TEXT
+              )}
             </View>
 
             {/* Aviso 2: Salud */}
@@ -90,17 +169,11 @@ export function NoticeDrawer({ visible, onClose, meshNodesCount = 3 }: NoticeDra
                 <Ionicons name="git-network-outline" size={16} color={Colors.secondary} />
                 <Text style={styles.meshOriginText}>Recibido vía Red Mesh</Text>
               </View>
-              <Pressable
-                style={styles.listenNoticeBtn}
-                onPress={() => {
-                  void speakSpanish(
-                    'Aviso de salud: Jornada de vacunación y citas médicas en Centro de Salud. Atención prioritaria para adultos mayores de 8 a 14 horas.'
-                  );
-                }}
-              >
-                <Ionicons name="volume-high" size={20} color={Colors.onPrimary} />
-                <Text style={styles.listenNoticeText}>Escuchar aviso</Text>
-              </Pressable>
+              {renderNoticeAudioControls(
+                NOTICE_SALUD_ID,
+                'Aviso de Salud y Vacunación',
+                NOTICE_SALUD_TEXT
+              )}
             </View>
           </ScrollView>
         </View>
@@ -264,7 +337,13 @@ const styles = StyleSheet.create({
     ...Typography.bodySm,
     color: Colors.onSurfaceVariant,
   },
+  noticeAudioRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
   listenNoticeBtn: {
+    flex: 1,
     minHeight: 50,
     backgroundColor: Colors.primary,
     borderRadius: 12,
@@ -272,10 +351,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 4,
+    paddingHorizontal: 12,
+  },
+  listenNoticeBtnActive: {
+    backgroundColor: Colors.secondary,
   },
   listenNoticeText: {
     ...Typography.labelMd,
     color: Colors.onPrimary,
+  },
+  stopNoticeBtn: {
+    minHeight: 50,
+    backgroundColor: Colors.error,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+  },
+  stopNoticeText: {
+    ...Typography.labelMd,
+    fontSize: 14,
+    color: Colors.onError,
   },
 });

@@ -11,9 +11,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { AppHeader } from '../../components/AppHeader';
 import { NoticeDrawer } from '../../components/NoticeDrawer';
+import { SpeechControlBar } from '../../components/SpeechControlBar';
+import { useSpeechStatus } from '../../hooks/useSpeechStatus';
 import { Colors, Spacing, Typography } from '../../theme/tokens';
 import { kvStore } from '../../services/kvStore';
-import { speakSpanish } from '../../services/voiceService';
+import {
+  pauseSpeaking,
+  resumeSpeaking,
+  speakSpanish,
+  stopSpeaking,
+} from '../../services/voiceService';
 import { TramiteCategory, TramiteProgress } from '../../types/vozGuia';
 
 interface HistoryItem {
@@ -90,6 +97,7 @@ function progressToHistoryItem(progress: TramiteProgress): HistoryItem {
 
 export default function HistorialScreen() {
   const router = useRouter();
+  const speech = useSpeechStatus();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<'todos' | TramiteCategory>('todos');
   const [modalItem, setModalItem] = useState<HistoryItem | null>(null);
@@ -325,30 +333,68 @@ export default function HistorialScreen() {
         visible={Boolean(modalItem)}
         transparent
         animationType="fade"
-        onRequestClose={() => setModalItem(null)}
+        onRequestClose={() => {
+          void stopSpeaking();
+          setModalItem(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{modalItem?.title}</Text>
             <Text style={styles.modalBody}>{modalItem?.summary}</Text>
 
+            <SpeechControlBar variant="inline" />
+
             <View style={styles.modalBtns}>
-              <Pressable
-                style={styles.modalVoiceBtn}
-                onPress={() => {
-                  if (modalItem) {
-                    void speakSpanish(`${modalItem.title}. ${modalItem.summary}`);
-                  }
-                }}
-              >
-                <Ionicons name="volume-high" size={20} color={Colors.primary} />
-                <Text style={styles.modalVoiceText}>Escuchar</Text>
-              </Pressable>
+              {(() => {
+                const modalSourceId = modalItem ? `history-${modalItem.id}` : '';
+                const isSpeakingModal =
+                  Boolean(modalSourceId) &&
+                  speech.sourceId === modalSourceId &&
+                  speech.status === 'speaking';
+                const isPausedModal =
+                  Boolean(modalSourceId) &&
+                  speech.sourceId === modalSourceId &&
+                  speech.status === 'paused';
+
+                return (
+                  <Pressable
+                    style={styles.modalVoiceBtn}
+                    onPress={() => {
+                      if (!modalItem) return;
+                      if (isSpeakingModal) {
+                        void pauseSpeaking();
+                        return;
+                      }
+                      if (isPausedModal) {
+                        void resumeSpeaking();
+                        return;
+                      }
+                      const settings = kvStore.getSettings();
+                      void speakSpanish(`${modalItem.title}. ${modalItem.summary}`, {
+                        rate: settings.speechRate,
+                        sourceId: modalSourceId,
+                        label: modalItem.title,
+                      });
+                    }}
+                  >
+                    <Ionicons
+                      name={isSpeakingModal ? 'pause' : isPausedModal ? 'play' : 'volume-high'}
+                      size={20}
+                      color={Colors.primary}
+                    />
+                    <Text style={styles.modalVoiceText}>
+                      {isSpeakingModal ? 'Pausar' : isPausedModal ? 'Reanudar' : 'Escuchar'}
+                    </Text>
+                  </Pressable>
+                );
+              })()}
 
               <Pressable
                 style={styles.modalCloseBtn}
                 onPress={() => {
                   const target = modalItem;
+                  void stopSpeaking();
                   setModalItem(null);
                   if (target) {
                     router.push({
@@ -371,7 +417,13 @@ export default function HistorialScreen() {
               </Pressable>
             </View>
 
-            <Pressable style={styles.modalDismissBtn} onPress={() => setModalItem(null)}>
+            <Pressable
+              style={styles.modalDismissBtn}
+              onPress={() => {
+                void stopSpeaking();
+                setModalItem(null);
+              }}
+            >
               <Text style={styles.modalDismissText}>Cerrar</Text>
             </Pressable>
           </View>

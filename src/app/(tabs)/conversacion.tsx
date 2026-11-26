@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { NoticeDrawer } from '../../components/NoticeDrawer';
+import { useSpeechStatus } from '../../hooks/useSpeechStatus';
 import { useVoiceCapture } from '../../hooks/useVoiceCapture';
 import { Colors, Spacing, Typography } from '../../theme/tokens';
 import { saveCustomTramite, searchTramitesLocal } from '../../services/database';
@@ -24,7 +25,15 @@ import { analyzeDocumentWithGemini, generateVoiceGuide } from '../../services/ge
 import { kvStore } from '../../services/kvStore';
 import { meshService } from '../../services/meshService';
 import { consumePendingDocument } from '../../services/pendingDocument';
-import { buildSpeechScript, speakSpanish, stopSpeaking } from '../../services/voiceService';
+import {
+  buildSpeechScript,
+  detectSpeechControlCommand,
+  executeSpeechCommand,
+  pauseSpeaking,
+  resumeSpeaking,
+  speakSpanish,
+  stopSpeaking,
+} from '../../services/voiceService';
 import {
   fetchOfficialTramiteGuide,
   guideResponseToTramiteRecord,
@@ -69,8 +78,11 @@ export default function ConversacionScreen() {
   const [activeSourceUrl, setActiveSourceUrl] = useState<string>('');
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [checkedRequirements, setCheckedRequirements] = useState<number[]>([]);
+  const speech = useSpeechStatus();
+  const isSpeaking = speech.status === 'speaking';
+  const isSpeechPaused = speech.status === 'paused';
+
   const [isLoading, setIsLoading] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceFeedback, setVoiceFeedback] = useState('');
   const [shareFeedback, setShareFeedback] = useState('');
 
@@ -121,11 +133,10 @@ export default function ConversacionScreen() {
   const speakGuideResponse = useCallback(async (response: VoiceGuideResponse, simplify: boolean) => {
     const settings = kvStore.getSettings();
     const script = buildSpeechScript(response, simplify);
-    setIsSpeaking(true);
     await speakSpanish(script, {
       rate: settings.speechRate,
-      onDone: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
+      sourceId: `guide-${makeGuideStorageId(response)}`,
+      label: response.title || 'Guía de Voz Guía',
     });
   }, []);
 
@@ -136,6 +147,13 @@ export default function ConversacionScreen() {
     ) => {
       const clean = queryText.trim();
       if (!clean) return;
+
+      const speechCmd = detectSpeechControlCommand(clean);
+      if (speechCmd) {
+        const msg = await executeSpeechCommand(speechCmd);
+        setVoiceFeedback(msg);
+        return;
+      }
 
       const simplify = options?.simplify ?? false;
       setIsLoading(true);
@@ -381,12 +399,23 @@ export default function ConversacionScreen() {
 
   const handleToggleListen = async () => {
     if (isSpeaking) {
-      await stopSpeaking();
-      setIsSpeaking(false);
+      await pauseSpeaking();
+      setVoiceFeedback('Audio en pausa. Toca Reanudar o Detener.');
+      return;
+    }
+    if (isSpeechPaused) {
+      await resumeSpeaking();
+      setVoiceFeedback('');
       return;
     }
     if (!guide) return;
+    setVoiceFeedback('');
     await speakGuideResponse(guide, false);
+  };
+
+  const handleStopListen = async () => {
+    await stopSpeaking();
+    setVoiceFeedback('Audio detenido.');
   };
 
   const handleToggleStep = (order: number) => {
@@ -445,6 +474,11 @@ export default function ConversacionScreen() {
     const clean = inputText.trim();
     if (!clean) return;
     setInputText('');
+    const speechCmd = detectSpeechControlCommand(clean);
+    if (speechCmd) {
+      void executeSpeechCommand(speechCmd).then((msg) => setVoiceFeedback(msg));
+      return;
+    }
     if (/^(https?:\/\/|www\.|gob\.mx)/i.test(clean)) {
       void runWebPageExtraction(clean, { autoSpeak: false });
       return;
@@ -505,10 +539,26 @@ export default function ConversacionScreen() {
           <View style={styles.statusLeft}>
             <View style={styles.pulseDot} />
             <Text style={styles.statusText}>
-              {isLoading ? 'Consultando y armando tu guía...' : 'Voz Guía lista para escucharte'}
+              {isLoading
+                ? 'Consultando y armando tu guía...'
+                : isSpeaking
+                ? 'Voz Guía está hablando...'
+                : isSpeechPaused
+                ? 'Audio en pausa'
+                : 'Voz Guía lista para escucharte'}
             </Text>
           </View>
-          <Text style={styles.audioActiveText}>Audio activo</Text>
+          {isSpeaking || isSpeechPaused ? (
+            <Pressable
+              onPress={() => void handleStopListen()}
+              accessibilityRole="button"
+              accessibilityLabel="Detener audio"
+            >
+              <Text style={styles.audioStopBannerText}>Detener audio</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.audioActiveText}>Audio listo</Text>
+          )}
         </View>
 
         {/* Burbuja del usuario */}
@@ -550,26 +600,52 @@ export default function ConversacionScreen() {
               </View>
             </View>
 
-            <Pressable
-              style={[styles.listenBtn, isSpeaking && styles.listenBtnActive]}
-              onPress={() => void handleToggleListen()}
-              accessibilityRole="button"
-              accessibilityLabel={isSpeaking ? 'Detener audio' : 'Escuchar respuesta'}
-            >
-              <Ionicons
-                name={isSpeaking ? 'stop-circle' : 'volume-high'}
-                size={20}
-                color={isSpeaking ? Colors.onSecondaryContainer : Colors.onPrimaryFixed}
-              />
-              <Text
+            <View style={styles.audioControlsRow}>
+              <Pressable
                 style={[
-                  styles.listenBtnText,
-                  isSpeaking && { color: Colors.onSecondaryContainer },
+                  styles.listenBtn,
+                  (isSpeaking || isSpeechPaused) && styles.listenBtnActive,
                 ]}
+                onPress={() => void handleToggleListen()}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isSpeaking
+                    ? 'Pausar audio'
+                    : isSpeechPaused
+                    ? 'Reanudar audio'
+                    : 'Escuchar respuesta'
+                }
               >
-                {isSpeaking ? 'Detener' : 'Escuchar'}
-              </Text>
-            </Pressable>
+                <Ionicons
+                  name={isSpeaking ? 'pause' : isSpeechPaused ? 'play' : 'volume-high'}
+                  size={18}
+                  color={
+                    isSpeaking || isSpeechPaused
+                      ? Colors.onSecondaryContainer
+                      : Colors.onPrimaryFixed
+                  }
+                />
+                <Text
+                  style={[
+                    styles.listenBtnText,
+                    (isSpeaking || isSpeechPaused) && { color: Colors.onSecondaryContainer },
+                  ]}
+                >
+                  {isSpeaking ? 'Pausar' : isSpeechPaused ? 'Reanudar' : 'Escuchar'}
+                </Text>
+              </Pressable>
+
+              {(isSpeaking || isSpeechPaused) && (
+                <Pressable
+                  style={styles.stopMiniBtn}
+                  onPress={() => void handleStopListen()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Detener audio"
+                >
+                  <Ionicons name="stop" size={18} color={Colors.onError} />
+                </Pressable>
+              )}
+            </View>
           </View>
 
           {isLoading ? (
@@ -711,25 +787,61 @@ export default function ConversacionScreen() {
                             </Text>
                           </Pressable>
 
-                          <Pressable
-                            style={styles.stepMiniBtn}
-                            onPress={() => {
-                              const settings = kvStore.getSettings();
-                              setIsSpeaking(true);
-                              void speakSpanish(
-                                `Paso ${step.order}: ${step.title}. ${step.instruction}`,
-                                {
-                                  rate: settings.speechRate,
-                                  onDone: () => setIsSpeaking(false),
-                                  onError: () => setIsSpeaking(false),
-                                }
-                              );
-                            }}
-                            accessibilityRole="button"
-                          >
-                            <Ionicons name="volume-medium" size={16} color={Colors.primary} />
-                            <Text style={styles.stepMiniBtnText}>Escuchar paso</Text>
-                          </Pressable>
+                          {(() => {
+                            const stepSourceId = `step-${step.order}`;
+                            const isStepSpeaking =
+                              speech.sourceId === stepSourceId && speech.status === 'speaking';
+                            const isStepPaused =
+                              speech.sourceId === stepSourceId && speech.status === 'paused';
+
+                            return (
+                              <Pressable
+                                style={[
+                                  styles.stepMiniBtn,
+                                  (isStepSpeaking || isStepPaused) && styles.stepMiniBtnActive,
+                                ]}
+                                onPress={() => {
+                                  if (isStepSpeaking) {
+                                    void pauseSpeaking();
+                                    return;
+                                  }
+                                  if (isStepPaused) {
+                                    void resumeSpeaking();
+                                    return;
+                                  }
+                                  const settings = kvStore.getSettings();
+                                  void speakSpanish(
+                                    `Paso ${step.order}: ${step.title}. ${step.instruction}`,
+                                    {
+                                      rate: settings.speechRate,
+                                      sourceId: stepSourceId,
+                                      label: `Paso ${step.order}: ${step.title}`,
+                                    }
+                                  );
+                                }}
+                                accessibilityRole="button"
+                              >
+                                <Ionicons
+                                  name={
+                                    isStepSpeaking
+                                      ? 'pause'
+                                      : isStepPaused
+                                      ? 'play'
+                                      : 'volume-medium'
+                                  }
+                                  size={16}
+                                  color={Colors.primary}
+                                />
+                                <Text style={styles.stepMiniBtnText}>
+                                  {isStepSpeaking
+                                    ? 'Pausar paso'
+                                    : isStepPaused
+                                    ? 'Reanudar paso'
+                                    : 'Escuchar paso'}
+                                </Text>
+                              </Pressable>
+                            );
+                          })()}
                         </View>
                       </View>
                     );
@@ -955,6 +1067,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.onSecondaryContainer,
   },
+  audioStopBannerText: {
+    ...Typography.labelSm,
+    fontSize: 12,
+    color: Colors.error,
+    textDecorationLine: 'underline',
+  },
   userBubbleWrapper: {
     alignItems: 'flex-end',
     marginTop: 4,
@@ -1023,6 +1141,11 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     fontWeight: '700',
   },
+  audioControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   listenBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1039,6 +1162,18 @@ const styles = StyleSheet.create({
     ...Typography.labelMd,
     fontSize: 13,
     color: Colors.onPrimaryFixed,
+  },
+  stopMiniBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepMiniBtnActive: {
+    backgroundColor: Colors.secondaryContainer,
+    borderColor: Colors.secondary,
   },
   loadingRow: {
     flexDirection: 'row',

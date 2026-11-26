@@ -19,6 +19,10 @@ import { Colors, Spacing, Typography } from '../../theme/tokens';
 import { pickDocumentImage, DocumentPickMode } from '../../services/documentPicker';
 import { meshService } from '../../services/meshService';
 import { setPendingDocument } from '../../services/pendingDocument';
+import {
+  detectSpeechControlCommand,
+  executeSpeechCommand,
+} from '../../services/voiceService';
 import { OFFICIAL_TRAMITE_SOURCES } from '../../services/webTramiteService';
 import { MeshStats } from '../../types/vozGuia';
 
@@ -44,6 +48,11 @@ export default function HomeScreen() {
 
   const handleVoiceTranscript = useCallback(
     (transcript: string) => {
+      const cmd = detectSpeechControlCommand(transcript);
+      if (cmd) {
+        void executeSpeechCommand(cmd).then((msg) => setFeedback(msg));
+        return;
+      }
       router.push({
         pathname: '/(tabs)/conversacion',
         params: {
@@ -107,6 +116,11 @@ export default function HomeScreen() {
     const clean = query.trim();
     if (!clean) return;
     setQuery('');
+    const cmd = detectSpeechControlCommand(clean);
+    if (cmd) {
+      void executeSpeechCommand(cmd).then((msg) => setFeedback(msg));
+      return;
+    }
     router.push({
       pathname: '/(tabs)/conversacion',
       params: { prompt: clean, reqId: nextReqId() },
