@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Tests (TypeScript)",
+      "type": "node",
+      "request": "launch",
+      "preLaunchTask": "tsc: compilar tests",
+      "runtimeArgs": ["--test"],
+      "program": "${workspaceFolder}/dist-tests/tests/vozGuia.test.js",
+      "outFiles": ["${workspaceFolder}/dist-tests/**/*.js"],
+      "sourceMaps": true,
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Debug Mesh Relay (Node)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/mesh-relay-server.mjs",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Debug Web (Chrome - Expo)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8081",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true
+    }
+  ]
+}
