@@ -34,11 +34,13 @@ export default function MeshAndSettingsScreen() {
   const [logs, setLogs] = useState<string[]>(() => meshService.getEventLog());
   const [capabilitiesNote, setCapabilitiesNote] = useState('');
   const [apiKeyDraft, setApiKeyDraft] = useState(settings.geminiApiKey);
+  const [relayUrlDraft, setRelayUrlDraft] = useState(settings.meshRelayUrl);
   const [selectedModel, setSelectedModel] = useState(() =>
     resolveGeminiModel(settings.geminiModel)
   );
   const [testQuery, setTestQuery] = useState('beca preparatoria');
   const [savedFeedback, setSavedFeedback] = useState('');
+  const [meshFeedback, setMeshFeedback] = useState('');
   const [testingGemini, setTestingGemini] = useState(false);
   const [geminiTestResult, setGeminiTestResult] = useState<{
     ok: boolean;
@@ -58,15 +60,17 @@ export default function MeshAndSettingsScreen() {
   );
 
   useEffect(() => {
+    const unsubscribe = meshService.subscribe(refreshState);
     void (async () => {
       const caps = await getNativeMeshCapabilities();
       setCapabilitiesNote(
-        `Android SDK ${caps.androidSdkInt} • BLE físico: ${
-          caps.hasBleHardware ? 'Sí' : 'No (Simulador / Expo Go / Web)'
-        } • Nearby: ${caps.hasNearbyConnections ? 'Disponible' : 'Modo BLE/Simulación'}`
+        `Android SDK ${caps.androidSdkInt} • BLE GATT físico: ${
+          caps.hasBleHardware ? 'Sí' : 'No (Expo Go / Web)'
+        } • Transporte actual: ${meshService.getTransportMode()}`
       );
     })();
-  }, []);
+    return unsubscribe;
+  }, [refreshState]);
 
   const toggleMesh = async (enabled: boolean) => {
     const updated = kvStore.saveSettings({ meshEnabled: enabled });
@@ -80,9 +84,38 @@ export default function MeshAndSettingsScreen() {
     refreshState();
   };
 
-  const handleSimulateMeshHop = async () => {
-    await meshService.queryAcrossMesh(testQuery || 'cita médica');
+  const handleSaveRelay = async () => {
+    const cleanRelay = relayUrlDraft.trim().replace(/\/+$/, '');
+    const updated = kvStore.saveSettings({ meshRelayUrl: cleanRelay });
+    setSettings(updated);
+    await meshService.start();
     refreshState();
+    setMeshFeedback(
+      cleanRelay
+        ? `Conectando a Relay Mesh LAN en ${cleanRelay}...`
+        : 'Relay LAN desactivado. Usando BLE GATT (en APK) o BroadcastChannel (en Web).'
+    );
+  };
+
+  const handleRealMeshQuery = async () => {
+    setMeshFeedback('Enviando consulta real a vecinos conectados...');
+    const hits = await meshService.queryAcrossMesh(testQuery || 'cita médica');
+    refreshState();
+    setMeshFeedback(
+      hits.length > 0
+        ? `¡Respuesta real recibida por Red Mesh!: ${hits[0].tramite.title}`
+        : 'Sin respuesta de vecinos reales en 3.5 s. Abre otro teléfono (APK BLE o Expo Go con mismo Relay LAN) o 2 pestañas Web.'
+    );
+  };
+
+  const handleSimulateMeshHop = async () => {
+    const hits = await meshService.simulateMultiHopDemo(testQuery || 'cita médica');
+    refreshState();
+    setMeshFeedback(
+      hits.length > 0
+        ? `[Simulación local] Salto de 2 nodos verificado: ${hits[0].tramite.title}`
+        : '[Simulación local] No hubo coincidencia en catálogo local.'
+    );
   };
 
   const handleSaveSettings = () => {
@@ -112,17 +145,133 @@ export default function MeshAndSettingsScreen() {
   };
 
   const hasKey = Boolean(settings.geminiApiKey.trim());
+  const transportLabel =
+    stats.transportMode === 'ble-gatt'
+      ? 'BLE GATT Nativo (Android APK)'
+      : stats.transportMode === 'lan-relay'
+      ? 'Relay Mesh LAN Wi-Fi (Expo Go / Web)'
+      : stats.transportMode === 'web-broadcast'
+      ? 'Web BroadcastChannel (entre pestañas)'
+      : 'En espera (sin hardware BLE ni Relay LAN)';
 
   return (
     <View style={styles.screen}>
-      <AppHeader title="Ajustes y Gemini" showBackButton meshActive={settings.meshEnabled} />
+      <AppHeader title="Ajustes y Red Mesh" showBackButton meshActive={settings.meshEnabled} />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        {/* Red Mesh Real */}
+        <View style={styles.card}>
+          <View style={styles.cardTitleRow}>
+            <Ionicons name="git-network-outline" size={22} color={Colors.primary} />
+            <Text style={styles.cardTitle}>Red Mesh ({transportLabel})</Text>
+          </View>
+
+          <Text style={styles.note}>
+            En APK nativo usa BLE GATT real entre teléfonos Android. Para probar 2 celulares reales
+            desde Expo Go en el mismo Wi-Fi, corre{' '}
+            <Text style={{ fontWeight: '700' }}>npm run mesh:relay</Text> en tu PC y pega su URL
+            aquí. En Web funciona automático abriendo 2 pestañas.
+          </Text>
+          {capabilitiesNote ? <Text style={styles.capText}>{capabilitiesNote}</Text> : null}
+
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>Activar descubrimiento y relevo Mesh</Text>
+            <Switch value={settings.meshEnabled} onValueChange={(v) => void toggleMesh(v)} />
+          </View>
+
+          <Text style={styles.subTitle}>URL de Relay Mesh Local (para Expo Go en Wi-Fi):</Text>
+          <View style={styles.btnRow}>
+            <TextInput
+              value={relayUrlDraft}
+              onChangeText={setRelayUrlDraft}
+              placeholder="http://192.168.1.50:8787"
+              placeholderTextColor={Colors.onSurfaceVariant}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              style={[styles.input, { flex: 1 }]}
+            />
+            <Pressable
+              style={styles.connectBtn}
+              onPress={() => void handleSaveRelay()}
+              accessibilityRole="button"
+            >
+              <Text style={styles.connectBtnText}>Conectar</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{stats.connectedPeers}</Text>
+              <Text style={styles.statLabel}>Vecinos</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{stats.packetsSent}</Text>
+              <Text style={styles.statLabel}>Enviados</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{stats.packetsRelayed}</Text>
+              <Text style={styles.statLabel}>Reenviados</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{stats.packetsDroppedDuplicate}</Text>
+              <Text style={styles.statLabel}>Duplicados</Text>
+            </View>
+          </View>
+
+          <Text style={styles.subTitle}>Consultar trámites en la Red Mesh:</Text>
+          <TextInput
+            value={testQuery}
+            onChangeText={setTestQuery}
+            placeholder="Consulta para enviar por mesh..."
+            placeholderTextColor={Colors.onSurfaceVariant}
+            style={styles.input}
+          />
+          <View style={styles.btnRow}>
+            <AccessibleButton
+              label="Enviar a vecinos reales"
+              onPress={() => void handleRealMeshQuery()}
+              style={styles.flexBtn}
+            />
+            <AccessibleButton
+              label="Simular (demo)"
+              variant="outline"
+              onPress={() => void handleSimulateMeshHop()}
+              style={styles.flexBtn}
+            />
+          </View>
+          {meshFeedback ? <Text style={styles.feedback}>{meshFeedback}</Text> : null}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Dispositivos cercanos reales ({peers.length})</Text>
+          {peers.length === 0 ? (
+            <Text style={styles.note}>
+              Aún no hay otros nodos Voz Guía detectados. Abre otra pestaña Web, conecta el mismo
+              Relay LAN en otro teléfono Expo Go, o acerca dos Android con el APK BLE instalado.
+            </Text>
+          ) : (
+            peers.map((peer) => (
+              <View key={peer.peerId} style={styles.peerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.peerName}>{peer.displayName}</Text>
+                  <Text style={styles.peerMeta}>
+                    ID: {peer.peerId} • {peer.transport ?? 'ble'} • {peer.hopDistance} salto(s)
+                  </Text>
+                </View>
+                <Text style={[styles.peerBadge, peer.hasInternet ? styles.netYes : styles.netNo]}>
+                  {peer.hasInternet ? 'Con internet' : 'Offline'}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+
         {/* Sección Google Gemini AI */}
         <View style={styles.card}>
           <View style={styles.cardTitleRow}>
             <Ionicons name="sparkles" size={22} color={Colors.secondary} />
-            <Text style={styles.cardTitle}>Google Gemini AI (Opcional)</Text>
+            <Text style={styles.cardTitle}>Google Gemini AI (Voz, Web y Fotos)</Text>
           </View>
 
           <View
@@ -143,15 +292,14 @@ export default function MeshAndSettingsScreen() {
               ]}
             >
               {hasKey
-                ? `Gemini configurado (${settings.geminiModel}) • Voz + Lectura de fotos`
+                ? `Gemini configurado (${settings.geminiModel}) • Voz + Web + Fotos`
                 : 'Modo 100% Offline activo (catálogo local sin internet)'}
             </Text>
           </View>
 
           <Text style={styles.note}>
-            Con una API Key de Google AI Studio (aistudio.google.com), Voz Guía desbloquea
-            conversación con memoria y lectura de documentos oficiales por foto. La clave se guarda
-            solo en este dispositivo para pruebas y nunca se sube al repositorio.
+            Con una API Key gratuita de Google AI Studio (aistudio.google.com), activas dictado por
+            micrófono en Expo Go, búsqueda actualizada en gob.mx y lectura de documentos por foto.
           </Text>
 
           <Text style={styles.subTitle}>Modelo Gemini:</Text>
@@ -276,70 +424,6 @@ export default function MeshAndSettingsScreen() {
           </View>
         </View>
 
-        {/* Red Mesh */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Red Mesh BLE (Primer Plano)</Text>
-          <Text style={styles.note}>
-            Protocolo de flooding controlado (TTL={settings.maxHops} saltos). Descubrimiento BLE
-            nativo en Android + transporte en prototipo/simulación.
-          </Text>
-          {capabilitiesNote ? <Text style={styles.capText}>{capabilitiesNote}</Text> : null}
-
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>Activar descubrimiento y relevo Mesh</Text>
-            <Switch value={settings.meshEnabled} onValueChange={(v) => void toggleMesh(v)} />
-          </View>
-
-          <View style={styles.statsGrid}>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.connectedPeers}</Text>
-              <Text style={styles.statLabel}>Vecinos</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.packetsSent}</Text>
-              <Text style={styles.statLabel}>Enviados</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.packetsRelayed}</Text>
-              <Text style={styles.statLabel}>Reenviados</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{stats.packetsDroppedDuplicate}</Text>
-              <Text style={styles.statLabel}>Duplicados</Text>
-            </View>
-          </View>
-
-          <Text style={styles.subTitle}>Probar salto de dispositivos (Flooding Controlado):</Text>
-          <TextInput
-            value={testQuery}
-            onChangeText={setTestQuery}
-            placeholder="Consulta para enviar por mesh..."
-            placeholderTextColor={Colors.onSurfaceVariant}
-            style={styles.input}
-          />
-          <AccessibleButton
-            label="Simular consulta multi-salto"
-            onPress={() => void handleSimulateMeshHop()}
-          />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Dispositivos cercanos ({peers.length})</Text>
-          {peers.map((peer) => (
-            <View key={peer.peerId} style={styles.peerRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.peerName}>{peer.displayName}</Text>
-                <Text style={styles.peerMeta}>
-                  ID: {peer.peerId} • Señal {peer.rssi} dBm • {peer.hopDistance} salto(s)
-                </Text>
-              </View>
-              <Text style={[styles.peerBadge, peer.hasInternet ? styles.netYes : styles.netNo]}>
-                {peer.hasInternet ? 'Con internet' : 'Offline'}
-              </Text>
-            </View>
-          ))}
-        </View>
-
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Registro de paquetes Mesh</Text>
           {logs.length === 0 ? (
@@ -386,6 +470,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     ...Typography.headlineSm,
     color: Colors.primary,
+    flexShrink: 1,
   },
   statusPill: {
     flexDirection: 'row',
@@ -453,9 +538,22 @@ const styles = StyleSheet.create({
   btnRow: {
     flexDirection: 'row',
     gap: 10,
+    alignItems: 'center',
   },
   flexBtn: {
     flex: 1,
+  },
+  connectBtn: {
+    minHeight: 50,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  connectBtnText: {
+    ...Typography.labelMd,
+    color: Colors.onPrimary,
   },
   testingRow: {
     flexDirection: 'row',

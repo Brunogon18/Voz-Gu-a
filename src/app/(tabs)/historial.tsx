@@ -14,64 +14,99 @@ import { NoticeDrawer } from '../../components/NoticeDrawer';
 import { Colors, Spacing, Typography } from '../../theme/tokens';
 import { kvStore } from '../../services/kvStore';
 import { speakSpanish } from '../../services/voiceService';
+import { TramiteCategory, TramiteProgress } from '../../types/vozGuia';
 
 interface HistoryItem {
   id: string;
-  category: 'becas' | 'salud' | 'educacion';
+  category: TramiteCategory;
   categoryLabel: string;
   status: 'Completado' | 'En progreso';
   title: string;
   dateText: string;
   summary: string;
+  sourceUrl?: string;
 }
 
-const HISTORY_DATA: HistoryItem[] = [
+const DEMO_HISTORY_DATA: HistoryItem[] = [
   {
-    id: '1',
+    id: 'demo-1',
     category: 'becas',
     categoryLabel: 'Becas',
     status: 'Completado',
     title: 'Solicitud de Beca de Manutención',
-    dateText: 'Hace 2 días',
+    dateText: 'Ejemplo guardado',
     summary:
-      'Folio #BM-4092 guardado localmente. Todos los documentos fueron enviados correctamente.',
+      'Ejemplo inicial. Al abrir cualquier trámite o importar una página oficial, tu progreso real aparecerá arriba automáticamente.',
   },
   {
-    id: '2',
+    id: 'demo-2',
     category: 'salud',
     categoryLabel: 'Salud',
     status: 'En progreso',
-    title: 'Cita médica en Centro de Salud',
-    dateText: 'Hoy',
+    title: 'Agendar cita médica familiar (IMSS)',
+    dateText: 'Ejemplo guardado',
     summary:
-      'Paso 2 de 3: Falta confirmar el horario disponible con tu voz o tocando la opción en pantalla.',
+      'Toca "Abrir en Asistente" para marcar tus requisitos y completar los pasos uno por uno.',
   },
   {
-    id: '3',
+    id: 'demo-3',
     category: 'educacion',
     categoryLabel: 'Educación',
     status: 'Completado',
     title: 'Constancia de estudios SEP',
-    dateText: 'Hace 1 semana',
+    dateText: 'Ejemplo guardado',
     summary:
-      'Documento validado y listo para descarga o consulta de vigencia sin conexión a internet.',
+      'Disponible sin conexión a internet dentro del catálogo local de Voz Guía.',
   },
 ];
+
+function categoryToLabel(cat: TramiteCategory): string {
+  if (cat === 'becas') return 'Becas';
+  if (cat === 'salud') return 'Salud';
+  return 'Educación';
+}
+
+function progressToHistoryItem(progress: TramiteProgress): HistoryItem {
+  const doneCount = progress.completedSteps.length;
+  const isCompleted = progress.totalSteps > 0 && doneCount >= progress.totalSteps;
+  const dateLabel = new Date(progress.updatedAt).toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  return {
+    id: progress.id,
+    category: progress.category,
+    categoryLabel: categoryToLabel(progress.category),
+    status: isCompleted ? 'Completado' : 'En progreso',
+    title: progress.title,
+    dateText: `${dateLabel} • ${doneCount}/${progress.totalSteps} pasos`,
+    summary: progress.summary,
+    sourceUrl: progress.sourceUrl,
+  };
+}
 
 export default function HistorialScreen() {
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<'todos' | 'becas' | 'salud' | 'educacion'>('todos');
+  const [selectedFilter, setSelectedFilter] = useState<'todos' | TramiteCategory>('todos');
   const [modalItem, setModalItem] = useState<HistoryItem | null>(null);
   const [recentQueries, setRecentQueries] = useState<string[]>(() => kvStore.getRecentQueries());
+  const [savedItems, setSavedItems] = useState<HistoryItem[]>(() =>
+    kvStore.getTramiteProgressList().map(progressToHistoryItem)
+  );
 
   useFocusEffect(
     useCallback(() => {
       setRecentQueries(kvStore.getRecentQueries());
+      setSavedItems(kvStore.getTramiteProgressList().map(progressToHistoryItem));
     }, [])
   );
 
-  const filteredItems = HISTORY_DATA.filter((item) => {
+  const combinedItems = savedItems.length > 0 ? savedItems : DEMO_HISTORY_DATA;
+  const filteredItems = combinedItems.filter((item) => {
     if (selectedFilter === 'todos') return true;
     return item.category === selectedFilter;
   });
@@ -87,7 +122,9 @@ export default function HistorialScreen() {
           <View style={styles.offlinePill}>
             <Ionicons name="checkmark-done-circle" size={18} color={Colors.secondary} />
             <Text style={styles.offlineText}>
-              Guardado en tu teléfono para consulta sin internet
+              {savedItems.length > 0
+                ? `${savedItems.length} guía(s) con progreso real guardado en tu teléfono`
+                : 'Guardado en tu teléfono para consulta sin internet'}
             </Text>
           </View>
         </View>
@@ -123,13 +160,22 @@ export default function HistorialScreen() {
         ) : null}
 
         {/* Chips de filtro */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+        >
           <Pressable
             style={[styles.filterChip, selectedFilter === 'todos' && styles.filterChipActive]}
             onPress={() => setSelectedFilter('todos')}
           >
-            <Text style={[styles.filterChipText, selectedFilter === 'todos' && styles.filterChipTextActive]}>
-              Todos ({HISTORY_DATA.length})
+            <Text
+              style={[
+                styles.filterChipText,
+                selectedFilter === 'todos' && styles.filterChipTextActive,
+              ]}
+            >
+              Todos ({combinedItems.length})
             </Text>
           </Pressable>
 
@@ -137,7 +183,12 @@ export default function HistorialScreen() {
             style={[styles.filterChip, selectedFilter === 'becas' && styles.filterChipActive]}
             onPress={() => setSelectedFilter('becas')}
           >
-            <Text style={[styles.filterChipText, selectedFilter === 'becas' && styles.filterChipTextActive]}>
+            <Text
+              style={[
+                styles.filterChipText,
+                selectedFilter === 'becas' && styles.filterChipTextActive,
+              ]}
+            >
               Becas
             </Text>
           </Pressable>
@@ -146,7 +197,12 @@ export default function HistorialScreen() {
             style={[styles.filterChip, selectedFilter === 'salud' && styles.filterChipActive]}
             onPress={() => setSelectedFilter('salud')}
           >
-            <Text style={[styles.filterChipText, selectedFilter === 'salud' && styles.filterChipTextActive]}>
+            <Text
+              style={[
+                styles.filterChipText,
+                selectedFilter === 'salud' && styles.filterChipTextActive,
+              ]}
+            >
               Salud
             </Text>
           </Pressable>
@@ -155,7 +211,12 @@ export default function HistorialScreen() {
             style={[styles.filterChip, selectedFilter === 'educacion' && styles.filterChipActive]}
             onPress={() => setSelectedFilter('educacion')}
           >
-            <Text style={[styles.filterChipText, selectedFilter === 'educacion' && styles.filterChipTextActive]}>
+            <Text
+              style={[
+                styles.filterChipText,
+                selectedFilter === 'educacion' && styles.filterChipTextActive,
+              ]}
+            >
               Educación
             </Text>
           </Pressable>
@@ -238,12 +299,14 @@ export default function HistorialScreen() {
                 <Pressable
                   style={[
                     styles.actionBtn,
-                    isCompleted ? { backgroundColor: Colors.primary } : { backgroundColor: Colors.secondary },
+                    isCompleted
+                      ? { backgroundColor: Colors.primary }
+                      : { backgroundColor: Colors.secondary },
                   ]}
                   onPress={() => setModalItem(item)}
                 >
                   <Text style={styles.actionBtnText}>
-                    {isCompleted ? 'Ver resumen' : 'Continuar'}
+                    {isCompleted ? 'Ver resumen' : 'Continuar guía'}
                   </Text>
                   <Ionicons
                     name={isCompleted ? 'arrow-forward' : 'play'}
@@ -285,24 +348,30 @@ export default function HistorialScreen() {
               <Pressable
                 style={styles.modalCloseBtn}
                 onPress={() => {
-                  const query = modalItem?.title;
+                  const target = modalItem;
                   setModalItem(null);
-                  if (query) {
+                  if (target) {
                     router.push({
                       pathname: '/(tabs)/conversacion',
-                      params: { prompt: query, reqId: String(Date.now()) },
+                      params: target.sourceUrl
+                        ? {
+                            sourceUrl: target.sourceUrl,
+                            prompt: target.title,
+                            reqId: String(Date.now()),
+                          }
+                        : {
+                            prompt: target.title,
+                            reqId: String(Date.now()),
+                          },
                     });
                   }
                 }}
               >
-                <Text style={styles.modalCloseText}>Abrir en Asistente</Text>
+                <Text style={styles.modalCloseText}>Abrir guía</Text>
               </Pressable>
             </View>
 
-            <Pressable
-              style={styles.modalDismissBtn}
-              onPress={() => setModalItem(null)}
-            >
+            <Pressable style={styles.modalDismissBtn} onPress={() => setModalItem(null)}>
               <Text style={styles.modalDismissText}>Cerrar</Text>
             </Pressable>
           </View>

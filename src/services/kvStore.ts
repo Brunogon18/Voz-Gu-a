@@ -1,5 +1,5 @@
 import Storage from 'expo-sqlite/kv-store';
-import { AppSettings } from '../types/vozGuia';
+import { AppSettings, TramiteProgress } from '../types/vozGuia';
 import { DEFAULT_GEMINI_MODEL, resolveGeminiModel } from './geminiService';
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -9,11 +9,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   largeTextMode: true,
   meshEnabled: true,
   maxHops: 4,
+  meshRelayUrl: process.env.EXPO_PUBLIC_MESH_RELAY_URL ?? '',
 };
 
 const SETTINGS_KEY = 'vozguia:settings';
 const NODE_ID_KEY = 'vozguia:node_id';
 const RECENT_QUERIES_KEY = 'vozguia:recent_queries';
+const PROGRESS_KEY = 'vozguia:tramite_progress';
 
 const memoryCache = new Map<string, string>();
 
@@ -73,6 +75,7 @@ export const kvStore = {
         ...parsed,
         geminiApiKey: parsed.geminiApiKey ?? DEFAULT_SETTINGS.geminiApiKey,
         geminiModel: resolveGeminiModel(parsed.geminiModel),
+        meshRelayUrl: parsed.meshRelayUrl ?? DEFAULT_SETTINGS.meshRelayUrl,
       };
     } catch {
       return { ...DEFAULT_SETTINGS };
@@ -108,6 +111,28 @@ export const kvStore = {
     );
     const next = [clean, ...current].slice(0, 8);
     setSyncRaw(RECENT_QUERIES_KEY, JSON.stringify(next));
+    return next;
+  },
+
+  getTramiteProgressList(): TramiteProgress[] {
+    const raw = getSyncRaw(PROGRESS_KEY);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as TramiteProgress[]) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  getTramiteProgress(id: string): TramiteProgress | null {
+    return this.getTramiteProgressList().find((item) => item.id === id) ?? null;
+  },
+
+  saveTramiteProgress(progress: TramiteProgress): TramiteProgress[] {
+    const current = this.getTramiteProgressList().filter((item) => item.id !== progress.id);
+    const next = [progress, ...current].slice(0, 25);
+    setSyncRaw(PROGRESS_KEY, JSON.stringify(next));
     return next;
   },
 };

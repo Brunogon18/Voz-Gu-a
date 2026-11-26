@@ -16,6 +16,7 @@
     "src/services/vectorSearch.ts",
     "src/services/meshRouter.ts",
     "src/services/geminiService.ts",
+    "src/services/webTramiteService.ts",
     "tests/**/*.ts"
   ]
 }

@@ -1,7 +1,9 @@
 import {
   ConversationTurn,
   DocumentImageInput,
+  GroundingSource,
   SearchResult,
+  TramiteCategory,
   TramiteRecord,
   TramiteStep,
   VoiceGuideResponse,
@@ -19,7 +21,7 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
   {
     id: 'gemini-3.5-flash-lite',
     label: 'Gemini 3.5 Flash-Lite',
-    description: 'Más rápido y económico (recomendado para voz y lectura de documentos)',
+    description: 'Más rápido y económico (recomendado para voz, web y lectura de documentos)',
   },
   {
     id: 'gemini-3.6-flash',
@@ -29,7 +31,7 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
   {
     id: 'gemini-3.8-flash',
     label: 'Gemini 3.8 Flash',
-    description: 'Máxima precisión en trámites complejos y documentos densos',
+    description: 'Máxima precisión en trámites complejos y búsqueda web oficial',
   },
 ];
 
@@ -51,10 +53,20 @@ interface GeminiPart {
   };
 }
 
+interface GeminiGroundingChunk {
+  web?: {
+    uri?: string;
+    title?: string;
+  };
+}
+
 interface GeminiGenerateContentResponse {
   candidates?: {
     content?: {
       parts?: GeminiPart[];
+    };
+    groundingMetadata?: {
+      groundingChunks?: GeminiGroundingChunk[];
     };
   }[];
   error?: {
@@ -66,9 +78,9 @@ interface GeminiGenerateContentResponse {
 
 const SYSTEM_INSTRUCTION = [
   'Eres Voz Guía, un asistente empático, cálido y paciente para adultos mayores, estudiantes y personas con poca experiencia digital en México.',
-  'Tu objetivo es explicar trámites de salud, educación y becas, o leer y explicar documentos oficiales fotografiados, en español de México claro y fácil de escuchar en voz alta.',
-  'Usa frases cortas, evita siglas sin explicar y nunca inventes datos oficiales, fechas o montos que no aparezcan en el contexto o en el documento.',
-  'Si una parte de un documento es borrosa o ilegible, dilo con honestidad y sugiere verificar en la ventanilla oficial.',
+  'Tu objetivo es explicar trámites de salud, educación, becas y servicios públicos en México en español claro y fácil de escuchar en voz alta.',
+  'Usa frases cortas, evita siglas sin explicar y nunca inventes datos oficiales, fechas, montos o teléfonos que no aparezcan en el contexto, en la página web o en el documento.',
+  'Si una parte de un documento es borrosa o falta información en la página, dilo con honestidad y sugiere verificar en la ventanilla oficial.',
 ].join(' ');
 
 export const VOICE_GUIDE_JSON_SCHEMA = {
@@ -77,6 +89,15 @@ export const VOICE_GUIDE_JSON_SCHEMA = {
     title: {
       type: 'string',
       description: 'Título corto y claro del trámite o documento',
+    },
+    category: {
+      type: 'string',
+      enum: ['salud', 'educacion', 'becas'],
+      description: 'Categoría más cercana del trámite',
+    },
+    institution: {
+      type: 'string',
+      description: 'Institución pública responsable (ej. IMSS, SEP, Bienestar, SRE)',
     },
     greeting: {
       type: 'string',
@@ -93,7 +114,7 @@ export const VOICE_GUIDE_JSON_SCHEMA = {
     importantDates: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Fechas límite, horarios, folios o teléfonos clave encontrados',
+      description: 'Fechas límite, horarios, costos, folios o teléfonos clave encontrados',
     },
     requirements: {
       type: 'array',
@@ -112,14 +133,25 @@ export const VOICE_GUIDE_JSON_SCHEMA = {
         },
         required: ['order', 'title', 'instruction', 'simpleExplanation'],
       },
-      description: 'Pasos ordenados que la persona debe seguir',
+      description: 'Pasos ordenados y accionables que la persona debe seguir',
     },
     closingTip: {
       type: 'string',
-      description: 'Consejo práctico final o recomendación de canal oficial',
+      description: 'Consejo práctico final o canal oficial (teléfono o sitio web)',
     },
   },
   required: ['title', 'greeting', 'simpleAnswer', 'requirements', 'steps', 'closingTip'],
+};
+
+const AUDIO_TRANSCRIPT_SCHEMA = {
+  type: 'object',
+  properties: {
+    transcript: {
+      type: 'string',
+      description: 'Transcripción literal en español de México de lo que dijo la persona, sin comentarios extra',
+    },
+  },
+  required: ['transcript'],
 };
 
 export function resolveGeminiModel(model?: string): string {
@@ -161,10 +193,11 @@ function getThinkingLevelForModel(model: string): 'minimal' | 'low' {
   return model.includes('flash-lite') ? 'minimal' : 'low';
 }
 
-function sanitizeHistory(history?: ConversationTurn[]): { role: 'user' | 'model'; parts: { text: string }[] }[] {
+function sanitizeHistory(
+  history?: ConversationTurn[]
+): { role: 'user' | 'model'; parts: { text: string }[] }[] {
   if (!history || history.length === 0) return [];
   const recent = history.slice(-6).filter((turn) => turn.text.trim().length > 0);
-  // Ensure the history starts with a user turn and merges consecutive same-role turns
   const normalized: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
   for (const turn of recent) {
     if (normalized.length === 0 && turn.role !== 'user') continue;
@@ -178,12 +211,39 @@ function sanitizeHistory(history?: ConversationTurn[]): { role: 'user' | 'model'
   return normalized;
 }
 
+function extractGroundingSources(
+  data: GeminiGenerateContentResponse,
+  extraUrl?: string
+): GroundingSource[] {
+  const seen = new Set<string>();
+  const sources: GroundingSource[] = [];
+
+  if (extraUrl && /^https?:\/\//i.test(extraUrl)) {
+    seen.add(extraUrl);
+    sources.push({ title: 'Página oficial consultada', url: extraUrl });
+  }
+
+  const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+  for (const chunk of chunks) {
+    const uri = chunk.web?.uri?.trim();
+    if (!uri || seen.has(uri)) continue;
+    seen.add(uri);
+    sources.push({
+      title: chunk.web?.title?.trim() || uri,
+      url: uri,
+    });
+  }
+
+  return sources.slice(0, 5);
+}
+
 export function buildGenerateContentBody(params: {
   query: string;
   searchResults: SearchResult[];
   model: string;
   simplify?: boolean;
   history?: ConversationTurn[];
+  enableWebSearch?: boolean;
 }) {
   const contextBlock = params.searchResults
     .slice(0, 2)
@@ -200,11 +260,12 @@ export function buildGenerateContentBody(params: {
     `Pregunta del usuario: "${params.query}"`,
     contextBlock
       ? `Contexto oficial del catálogo local:\n${contextBlock}`
+      : params.enableWebSearch
+      ? 'Busca información oficial actualizada en portales gubernamentales de México (como gob.mx, imss.gob.mx, sep.gob.mx, becasbenitojuarez.gob.mx) y construye una guía paso a paso completa y accionable.'
       : 'No hubo coincidencia exacta en el catálogo local; ofrece orientación general segura para México y recomienda verificar en ventanilla oficial.',
   ].join('\n\n');
 
   const historyContents = sanitizeHistory(params.history);
-  // Guarantee the request always ends with a user turn (Gemini 3.6+ rejects trailing model turns)
   const contents = [
     ...historyContents,
     { role: 'user' as const, parts: [{ text: userPrompt }] },
@@ -215,6 +276,62 @@ export function buildGenerateContentBody(params: {
       parts: [{ text: SYSTEM_INSTRUCTION }],
     },
     contents,
+    ...(params.enableWebSearch ? { tools: [{ google_search: {} }] } : {}),
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseJsonSchema: VOICE_GUIDE_JSON_SCHEMA,
+      thinkingConfig: {
+        thinkingLevel: getThinkingLevelForModel(params.model),
+      },
+    },
+  };
+}
+
+export function buildWebPageGuideBody(params: {
+  url: string;
+  pageTitle?: string;
+  pageText?: string;
+  userQuestion?: string;
+  model: string;
+  simplify?: boolean;
+  useUrlContextTool?: boolean;
+}) {
+  const promptParts = [
+    `Genera una guía práctica paso a paso en español de México basada en esta página web oficial de trámites: ${params.url}`,
+    params.simplify
+      ? 'Explícalo con palabras MUY sencillas, frases cortas y tono tranquilo para un adulto mayor.'
+      : 'Resume requisitos exactos, costos/fechas si aparecen, pasos numerados claros y canal oficial de atención.',
+  ];
+
+  if (params.userQuestion?.trim()) {
+    promptParts.push(`Enfócate en responder: "${params.userQuestion.trim()}"`);
+  }
+
+  if (params.pageText?.trim()) {
+    promptParts.push(
+      `Contenido extraído de la página${params.pageTitle ? ` (${params.pageTitle})` : ''}:\n${params.pageText.slice(0, 12000)}`
+    );
+  } else {
+    promptParts.push(
+      'Consulta la URL oficial indicada (y búsquedas en el mismo dominio oficial si la página redirige) para construir la guía actualizada.'
+    );
+  }
+
+  const tools = params.useUrlContextTool
+    ? [{ url_context: {} }, { google_search: {} }]
+    : undefined;
+
+  return {
+    systemInstruction: {
+      parts: [{ text: SYSTEM_INSTRUCTION }],
+    },
+    contents: [
+      {
+        role: 'user' as const,
+        parts: [{ text: promptParts.join('\n\n') }],
+      },
+    ],
+    ...(tools ? { tools } : {}),
     generationConfig: {
       responseMimeType: 'application/json',
       responseJsonSchema: VOICE_GUIDE_JSON_SCHEMA,
@@ -271,10 +388,44 @@ export function buildDocumentAnalysisBody(params: {
   };
 }
 
+export function buildAudioTranscriptionBody(params: {
+  base64: string;
+  mimeType: string;
+  model: string;
+}) {
+  return {
+    contents: [
+      {
+        role: 'user' as const,
+        parts: [
+          {
+            inlineData: {
+              mimeType: params.mimeType || 'audio/mp4',
+              data: params.base64,
+            },
+          },
+          {
+            text: 'Transcribe exactamente en español de México lo que dijo la persona en este audio sobre un trámite o pregunta. Si solo hay silencio o ruido sin voz humana, devuelve una cadena vacía en transcript.',
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseJsonSchema: AUDIO_TRANSCRIPT_SCHEMA,
+      thinkingConfig: {
+        thinkingLevel: getThinkingLevelForModel(params.model),
+      },
+    },
+  };
+}
+
 function extractAnswerText(data: GeminiGenerateContentResponse): string | null {
   const parts = data.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts) || parts.length === 0) return null;
-  const visiblePart = parts.find((part) => !part.thought && typeof part.text === 'string' && part.text.trim());
+  const visiblePart = parts.find(
+    (part) => !part.thought && typeof part.text === 'string' && part.text.trim()
+  );
   const fallbackPart = parts.find((part) => typeof part.text === 'string' && part.text.trim());
   const raw = visiblePart?.text ?? fallbackPart?.text ?? '';
   if (!raw) return null;
@@ -286,6 +437,11 @@ function extractAnswerText(data: GeminiGenerateContentResponse): string | null {
     .trim();
 }
 
+function normalizeCategory(value?: string): TramiteCategory | undefined {
+  if (value === 'salud' || value === 'educacion' || value === 'becas') return value;
+  return undefined;
+}
+
 export function parseVoiceGuideJson(
   rawText: string,
   options: {
@@ -293,6 +449,8 @@ export function parseVoiceGuideJson(
     fallbackTramite?: TramiteRecord | null;
     simplify?: boolean;
     defaultTitle?: string;
+    source?: VoiceGuideResponse['source'];
+    sourceUrls?: GroundingSource[];
   }
 ): VoiceGuideResponse {
   const parsed = JSON.parse(rawText) as Partial<VoiceGuideResponse>;
@@ -329,7 +487,10 @@ export function parseVoiceGuideJson(
     : undefined;
 
   return {
+    id: fallback?.id,
     title: parsed.title?.trim() || fallback?.title || options.defaultTitle || 'Guía de trámite',
+    category: normalizeCategory(parsed.category) ?? fallback?.category ?? 'educacion',
+    institution: parsed.institution?.trim() || fallback?.institution || 'Portal oficial',
     greeting: parsed.greeting?.trim() || 'Con mucho gusto te explico.',
     simpleAnswer: parsed.simpleAnswer?.trim() || fallback?.simpleSummary || '',
     requirements,
@@ -337,7 +498,8 @@ export function parseVoiceGuideJson(
     closingTip: parsed.closingTip?.trim() || 'Recuerda llevar tus documentos en original y copia.',
     documentDetected: parsed.documentDetected?.trim() || undefined,
     importantDates: importantDates && importantDates.length > 0 ? importantDates : undefined,
-    source: 'gemini',
+    sourceUrls: options.sourceUrls && options.sourceUrls.length > 0 ? options.sourceUrls : undefined,
+    source: options.source ?? 'gemini',
     modelUsed: options.model,
   };
 }
@@ -358,11 +520,11 @@ export function buildOfflineGuideResponse(
     return {
       title: 'No encontré un trámite exacto',
       greeting: 'Te ayudo con gusto.',
-      simpleAnswer: `Busqué "${query}" en tu guía local sin internet, pero no encontré coincidencia exacta. Intenta preguntar por: cita médica IMSS, IMSS-Bienestar, beca Benito Juárez, beca Rita Cetina, certificado SEP o constancia de estudios.`,
+      simpleAnswer: `Busqué "${query}" en tu guía local sin internet, pero no encontré coincidencia exacta. Intenta preguntar por: cita médica IMSS, IMSS-Bienestar, beca Benito Juárez, beca Rita Cetina, certificado SEP o constancia de estudios, o importa una página oficial desde el botón Web.`,
       requirements: [],
       steps: [],
       closingTip:
-        'También puedes configurar tu API Key de Google Gemini en Ajustes para consultas abiertas o lectura de documentos con foto.',
+        'También puedes configurar tu API Key de Google Gemini en Ajustes para buscar trámites en vivo en gob.mx o leer documentos con foto.',
       source,
       hopCount: options?.hopCount,
       diagnosticsNote: options?.diagnosticsNote,
@@ -371,7 +533,10 @@ export function buildOfflineGuideResponse(
 
   const simplify = options?.simplify ?? false;
   return {
+    id: tramite.id,
     title: tramite.title,
+    category: tramite.category,
+    institution: tramite.institution,
     greeting: `Aquí tienes la guía para: ${tramite.title}.`,
     simpleAnswer: simplify
       ? `${tramite.simpleSummary} Este trámite es ante ${tramite.institution} y tiene un costo: ${tramite.cost}.`
@@ -382,6 +547,9 @@ export function buildOfflineGuideResponse(
       instruction: simplify ? step.simpleExplanation : step.instruction,
     })),
     closingTip: `Tiempo aproximado: ${tramite.estimatedTime}. Canal oficial: ${tramite.officialChannel}.`,
+    sourceUrls: tramite.sourceUrl
+      ? [{ title: tramite.officialChannel || tramite.title, url: tramite.sourceUrl }]
+      : undefined,
     source,
     hopCount: options?.hopCount,
     diagnosticsNote: options?.diagnosticsNote,
@@ -395,11 +563,13 @@ export async function generateVoiceGuide(params: {
   model?: string;
   simplify?: boolean;
   history?: ConversationTurn[];
+  enableWebSearch?: boolean;
 }): Promise<VoiceGuideResponse> {
   const topMatch = params.searchResults[0]?.tramite ?? null;
   const apiKey = params.apiKey?.trim() ?? '';
   const model = resolveGeminiModel(params.model);
-  const offlineSource = params.searchResults[0]?.source === 'mesh-hop' ? 'mesh-peer' : 'offline-local';
+  const offlineSource =
+    params.searchResults[0]?.source === 'mesh-hop' ? 'mesh-peer' : 'offline-local';
 
   if (!apiKey) {
     return buildOfflineGuideResponse(params.query, topMatch, {
@@ -409,16 +579,21 @@ export async function generateVoiceGuide(params: {
     });
   }
 
+  // Automatically turn on live Google Search grounding when the local catalog has no strong match
+  const shouldSearchWeb =
+    params.enableWebSearch ?? (!topMatch || (params.searchResults[0]?.score ?? 0) < 0.22);
+
   const body = buildGenerateContentBody({
     query: params.query,
     searchResults: params.searchResults,
     model,
     simplify: params.simplify,
     history: params.history,
+    enableWebSearch: shouldSearchWeb,
   });
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), shouldSearchWeb ? 22000 : 15000);
 
   try {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -453,10 +628,13 @@ export async function generateVoiceGuide(params: {
       });
     }
 
+    const sources = extractGroundingSources(data, topMatch?.sourceUrl);
     return parseVoiceGuideJson(rawText, {
       model,
       fallbackTramite: topMatch,
       simplify: params.simplify,
+      source: sources.length > 0 && shouldSearchWeb ? 'gemini-web' : 'gemini',
+      sourceUrls: sources,
     });
   } catch {
     return buildOfflineGuideResponse(params.query, topMatch, {
@@ -464,6 +642,145 @@ export async function generateVoiceGuide(params: {
       source: offlineSource,
       diagnosticsNote: 'Sin conexión o tiempo agotado con Gemini; se mostró la guía offline.',
     });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function generateGuideFromWebPageWithGemini(params: {
+  url: string;
+  pageTitle?: string;
+  pageText?: string;
+  userQuestion?: string;
+  apiKey: string;
+  model?: string;
+  simplify?: boolean;
+}): Promise<VoiceGuideResponse | null> {
+  const apiKey = params.apiKey.trim();
+  if (!apiKey) return null;
+
+  const model = resolveGeminiModel(params.model);
+  const useUrlContextTool = !params.pageText?.trim();
+  const body = buildWebPageGuideBody({
+    url: params.url,
+    pageTitle: params.pageTitle,
+    pageText: params.pageText,
+    userQuestion: params.userQuestion,
+    model,
+    simplify: params.simplify,
+    useUrlContextTool,
+  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent`;
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as GeminiGenerateContentResponse;
+    const rawText = extractAnswerText(data);
+    if (!rawText) return null;
+
+    const sources = extractGroundingSources(data, params.url);
+    return parseVoiceGuideJson(rawText, {
+      model,
+      simplify: params.simplify,
+      defaultTitle: params.pageTitle || 'Guía desde página oficial',
+      source: 'gemini-web',
+      sourceUrls: sources,
+    });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function transcribeAudioWithGemini(params: {
+  base64: string;
+  mimeType: string;
+  apiKey: string;
+  model?: string;
+}): Promise<{ ok: boolean; transcript: string; error?: string }> {
+  const apiKey = params.apiKey.trim();
+  const model = resolveGeminiModel(params.model);
+  if (!apiKey) {
+    return {
+      ok: false,
+      transcript: '',
+      error: 'Configura tu API Key de Gemini en Ajustes para usar el micrófono en Expo Go.',
+    };
+  }
+
+  const body = buildAudioTranscriptionBody({
+    base64: params.base64,
+    mimeType: params.mimeType,
+    model,
+  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent`;
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        transcript: '',
+        error: `Gemini devolvió HTTP ${response.status} al transcribir el audio.`,
+      };
+    }
+
+    const data = (await response.json()) as GeminiGenerateContentResponse;
+    const rawText = extractAnswerText(data);
+    if (!rawText) {
+      return { ok: false, transcript: '', error: 'No se detectó voz en la grabación.' };
+    }
+
+    const parsed = JSON.parse(rawText) as { transcript?: string };
+    const transcript = parsed.transcript?.trim() ?? '';
+    if (!transcript) {
+      return {
+        ok: false,
+        transcript: '',
+        error: 'No alcancé a escuchar palabras claras. Intenta hablar más cerca del micrófono.',
+      };
+    }
+
+    return { ok: true, transcript };
+  } catch {
+    return {
+      ok: false,
+      transcript: '',
+      error: 'Sin conexión a internet para transcribir audio con Gemini.',
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -483,23 +800,23 @@ export async function analyzeDocumentWithGemini(params: {
       title: 'Lectura de documento requiere Gemini AI',
       greeting: 'Para leer una foto de tu documento necesito activar Gemini.',
       simpleAnswer:
-        'Aún no has guardado tu API Key de Google AI Studio. Toca el botón de Ajustes arriba a la derecha (icono de persona o píldora Mesh) para pegarla. Mientras tanto, puedes consultar cualquiera de los trámites oficiales sin internet.',
+        'Aún no has guardado tu API Key de Google AI Studio. Toca el botón de Ajustes arriba a la derecha para pegarla. Mientras tanto, puedes consultar cualquiera de los trámites oficiales sin internet.',
       requirements: ['Conexión a internet para lectura visual con Gemini', 'API Key gratuita de Google AI Studio'],
       steps: [
         {
           order: 1,
           title: 'Abre Ajustes y Gemini',
-          instruction: 'Toca la píldora "Mesh activo" o el icono de usuario en la esquina superior derecha.',
+          instruction: 'Toca la píldora "Mesh activo" o el icono de engrane en la esquina superior derecha.',
           simpleExplanation: 'Toca el botón de arriba a la derecha para abrir Ajustes.',
         },
         {
           order: 2,
           title: 'Pega tu llave de Google AI Studio',
-          instruction: 'Copia tu clave desde aistudio.google.com, pégala en el campo de Gemini y toca "Guardar configuración".',
+          instruction: 'Copia tu clave desde aistudio.google.com, pégala en el campo de Gemini y toca "Guardar".',
           simpleExplanation: 'Pega tu clave de Google AI Studio y toca Guardar.',
         },
       ],
-      closingTip: 'Las consultas por texto y voz sobre trámites del catálogo siguen funcionando 100% sin internet.',
+      closingTip: 'Las consultas sobre el catálogo local siguen funcionando 100% sin internet.',
       source: 'offline-local',
       diagnosticsNote: 'Falta API Key de Gemini en Ajustes para analizar imágenes.',
     };
@@ -537,7 +854,7 @@ export async function analyzeDocumentWithGemini(params: {
           apiMessage = `HTTP ${response.status}: ${errBody.error.message}`;
         }
       } catch {
-        // Ignore JSON parse error on error response
+        // Ignore JSON parse error
       }
       return {
         title: 'No pude leer el documento ahora',
@@ -549,8 +866,8 @@ export async function analyzeDocumentWithGemini(params: {
           {
             order: 1,
             title: 'Verifica tu conexión y clave',
-            instruction: 'Abre Ajustes y usa el botón "Probar conexión con Gemini" para revisar el estado.',
-            simpleExplanation: 'Abre Ajustes y presiona "Probar conexión con Gemini".',
+            instruction: 'Abre Ajustes y usa el botón "Probar Gemini" para revisar el estado.',
+            simpleExplanation: 'Abre Ajustes y presiona "Probar Gemini".',
           },
         ],
         closingTip: 'También puedes escribir el nombre del trámite para consultarlo sin internet.',
@@ -585,7 +902,7 @@ export async function analyzeDocumentWithGemini(params: {
       title: 'Sin conexión para leer la foto',
       greeting: 'Parece que ahora no hay internet.',
       simpleAnswer:
-        'La lectura de fotos con Gemini necesita internet. Si estás desconectado, puedes escribir o elegir una categoría para consultar los trámites guardados en tu teléfono.',
+        'La lectura de fotos con Gemini necesita internet. Si estás desconectado, puedes elegir una categoría para consultar los trámites guardados en tu teléfono.',
       requirements: [],
       steps: [],
       closingTip: 'Cuando recuperes señal, vuelve a tomar la foto y te la leo en voz alta.',
@@ -658,7 +975,7 @@ export async function testGeminiConnection(
     return {
       ok: true,
       modelUsed: resolvedModel,
-      message: `Conexión exitosa con ${resolvedModel}. Gemini AI y lectura de documentos están listos.`,
+      message: `Conexión exitosa con ${resolvedModel}. Voz, búsqueda web y lectura de fotos están listas.`,
     };
   } catch {
     return {

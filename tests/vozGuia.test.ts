@@ -3,9 +3,11 @@ import test from 'node:test';
 import { TRAMITES_CATALOG } from '../src/data/tramitesCatalog';
 import {
   analyzeDocumentWithGemini,
+  buildAudioTranscriptionBody,
   buildDocumentAnalysisBody,
   buildGenerateContentBody,
   buildOfflineGuideResponse,
+  buildWebPageGuideBody,
   DEFAULT_GEMINI_MODEL,
   extractBase64FromPickerAsset,
   parseVoiceGuideJson,
@@ -13,6 +15,12 @@ import {
 } from '../src/services/geminiService';
 import { ControlledFloodingRouter } from '../src/services/meshRouter';
 import { createVectorIndex, searchVectorIndex } from '../src/services/vectorSearch';
+import {
+  extractReadablePageFromHtml,
+  guideResponseToTramiteRecord,
+  normalizeOfficialUrl,
+  parseHtmlToFunctionalGuide,
+} from '../src/services/webTramiteService';
 
 test('vectorSearch finds medical appointment tramite offline', () => {
   const index = createVectorIndex(TRAMITES_CATALOG);
@@ -88,12 +96,14 @@ test('buildGenerateContentBody uses JSON schema, valid thinkingLevel, and multi-
   assert.equal(liteBody.contents[liteBody.contents.length - 1].role, 'user');
   assert.equal(liteBody.contents.length, 3);
 
-  const flash38Body = buildGenerateContentBody({
-    query: 'Cita IMSS',
-    searchResults: results,
+  const webBody = buildGenerateContentBody({
+    query: 'Cómo tramitar pasaporte mexicano',
+    searchResults: [],
     model: 'gemini-3.8-flash',
+    enableWebSearch: true,
   });
-  assert.equal(flash38Body.generationConfig.thinkingConfig.thinkingLevel, 'low');
+  assert.equal(webBody.generationConfig.thinkingConfig.thinkingLevel, 'low');
+  assert.ok('tools' in webBody);
 });
 
 test('buildDocumentAnalysisBody encodes multimodal image payload and parses structured output', () => {
@@ -150,4 +160,61 @@ test('analyzeDocumentWithGemini gracefully falls back when no API key is configu
   assert.equal(response.source, 'offline-local');
   assert.ok(response.steps.length > 0);
   assert.ok(response.diagnosticsNote?.includes('API Key'));
+});
+
+test('buildAudioTranscriptionBody creates structured multimodal audio request', () => {
+  const body = buildAudioTranscriptionBody({
+    base64: 'UklGRg==',
+    mimeType: 'audio/mp4',
+    model: 'gemini-3.5-flash-lite',
+  });
+  const firstPart = body.contents[0].parts[0] as { inlineData?: { mimeType: string; data: string } };
+  assert.equal(firstPart.inlineData?.mimeType, 'audio/mp4');
+  assert.equal(firstPart.inlineData?.data, 'UklGRg==');
+  assert.equal(body.generationConfig.responseMimeType, 'application/json');
+});
+
+test('webTramiteService parses official HTML page into functional offline guide and TramiteRecord', () => {
+  assert.equal(normalizeOfficialUrl('gob.mx/tramites'), 'https://gob.mx/tramites');
+
+  const sampleHtml = `
+    <html>
+      <head>
+        <title>Pensi&oacute;n para el Bienestar | gob.mx</title>
+        <meta name="description" content="Apoyo bimestral gratuito para personas adultas mayores de 65 a&ntilde;os en M&eacute;xico." />
+      </head>
+      <body>
+        <h1>Pensi&oacute;n para el Bienestar</h1>
+        <p>Para realizar tu registro acude al m&oacute;dulo m&aacute;s cercano o llama al 800 639 4264.</p>
+        <ul>
+          <li>Identificaci&oacute;n oficial vigente (INE o INAPAM) en original y copia</li>
+          <li>CURP de impresi&oacute;n reciente y comprobante de domicilio</li>
+          <li>Ubica tu m&oacute;dulo de Bienestar seg&uacute;n la letra de tu primer apellido</li>
+          <li>Entrega tus papeles y guarda tu tal&oacute;n de registro para recoger tu tarjeta</li>
+        </ul>
+      </body>
+    </html>
+  `;
+
+  const extracted = extractReadablePageFromHtml(sampleHtml, 'https://www.gob.mx/bienestar');
+  assert.equal(extracted.title, 'Pensión para el Bienestar | gob.mx');
+  assert.ok(extracted.phones.includes('800 639 4264'));
+
+  const guide = parseHtmlToFunctionalGuide(sampleHtml, 'https://www.gob.mx/bienestar');
+  assert.equal(guide.source, 'web-page');
+  assert.equal(guide.category, 'salud');
+  assert.ok(guide.requirements.length >= 2);
+  assert.ok(guide.steps.length >= 2);
+  assert.equal(guide.sourceUrls?.[0]?.url, 'https://www.gob.mx/bienestar');
+
+  const record = guideResponseToTramiteRecord(guide, 'https://www.gob.mx/bienestar');
+  assert.equal(record.sourceUrl, 'https://www.gob.mx/bienestar');
+  assert.ok(record.steps.length >= 2);
+
+  const urlContextBody = buildWebPageGuideBody({
+    url: 'https://www.gob.mx/bienestar',
+    model: 'gemini-3.5-flash-lite',
+    useUrlContextTool: true,
+  });
+  assert.ok('tools' in urlContextBody);
 });

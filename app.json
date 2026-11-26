@@ -55,7 +55,17 @@
           "cameraPermission": "Voz Guía necesita acceso a la cámara para tomar foto a tus documentos y explicártelos por voz.",
           "microphonePermission": false
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Voz Guía necesita acceso al micrófono para escuchar tus preguntas de trámites por voz.",
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "./plugins/withVozGuiaNative",
+      "expo-asset"
     ]
   }
 }

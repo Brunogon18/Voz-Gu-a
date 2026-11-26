@@ -21,6 +21,7 @@ export interface TramiteRecord {
   officialChannel: string;
   keywords: string[];
   updatedAt: string;
+  sourceUrl?: string;
 }
 
 export interface SearchResult {
@@ -30,7 +31,9 @@ export interface SearchResult {
   source: 'local-sqlite' | 'mesh-hop' | 'online-sync';
 }
 
-export type MeshPacketType = 'QUERY' | 'RESPONSE' | 'BEACON';
+export type MeshPacketType = 'QUERY' | 'RESPONSE' | 'BEACON' | 'TRAMITE_SHARE';
+
+export type MeshTransportMode = 'ble-gatt' | 'lan-relay' | 'web-broadcast' | 'offline-idle';
 
 export interface MeshPacket {
   packetId: string;
@@ -52,6 +55,7 @@ export interface MeshPeer {
   hasInternet: boolean;
   lastSeenAt: number;
   hopDistance: number;
+  transport?: MeshTransportMode | 'demo';
 }
 
 export interface MeshStats {
@@ -64,6 +68,7 @@ export interface MeshStats {
   packetsDroppedDuplicate: number;
   packetsDroppedTtl: number;
   connectedPeers: number;
+  transportMode?: MeshTransportMode;
 }
 
 export interface ConversationTurn {
@@ -78,19 +83,40 @@ export interface DocumentImageInput {
   prompt?: string;
 }
 
+export interface GroundingSource {
+  title: string;
+  url: string;
+}
+
 export interface VoiceGuideResponse {
+  id?: string;
   title: string;
   greeting: string;
   simpleAnswer: string;
   requirements: string[];
   steps: TramiteStep[];
   closingTip: string;
-  source: 'gemini' | 'offline-local' | 'mesh-peer';
+  source: 'gemini' | 'gemini-web' | 'web-page' | 'offline-local' | 'mesh-peer';
   modelUsed?: string;
   hopCount?: number;
   diagnosticsNote?: string;
   documentDetected?: string;
   importantDates?: string[];
+  sourceUrls?: GroundingSource[];
+  category?: TramiteCategory;
+  institution?: string;
+}
+
+export interface TramiteProgress {
+  id: string;
+  title: string;
+  category: TramiteCategory;
+  summary: string;
+  sourceUrl?: string;
+  completedSteps: number[];
+  checkedRequirements: number[];
+  totalSteps: number;
+  updatedAt: number;
 }
 
 export interface AppSettings {
@@ -100,4 +126,5 @@ export interface AppSettings {
   largeTextMode: boolean;
   meshEnabled: boolean;
   maxHops: number;
+  meshRelayUrl: string;
 }

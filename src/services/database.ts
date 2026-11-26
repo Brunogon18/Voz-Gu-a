@@ -115,6 +115,33 @@ export async function searchTramitesLocal(
   });
 }
 
+export async function saveCustomTramite(tramite: TramiteRecord): Promise<void> {
+  await initDatabase();
+  const vector = buildNormalizedVector(buildTramiteSearchText(tramite));
+
+  if (dbInstance) {
+    try {
+      await dbInstance.runAsync(
+        `INSERT OR REPLACE INTO tramites (id, title, category, institution, payload_json, vector_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        tramite.id,
+        tramite.title,
+        tramite.category,
+        tramite.institution,
+        JSON.stringify(tramite),
+        JSON.stringify(vector),
+        tramite.updatedAt
+      );
+    } catch {
+      // Keep in-memory index updated even if disk write fails
+    }
+  }
+
+  const current = cachedIndex ?? createVectorIndex(TRAMITES_CATALOG);
+  const filtered = current.filter((item) => item.tramite.id !== tramite.id);
+  cachedIndex = [{ tramite, vector }, ...filtered];
+}
+
 export async function saveMeshCachedResponse(
   packetId: string,
   query: string,

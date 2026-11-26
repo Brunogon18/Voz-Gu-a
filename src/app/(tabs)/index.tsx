@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,48 +14,52 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { NoticeDrawer } from '../../components/NoticeDrawer';
+import { useVoiceCapture } from '../../hooks/useVoiceCapture';
 import { Colors, Spacing, Typography } from '../../theme/tokens';
 import { pickDocumentImage, DocumentPickMode } from '../../services/documentPicker';
-import { kvStore } from '../../services/kvStore';
+import { meshService } from '../../services/meshService';
 import { setPendingDocument } from '../../services/pendingDocument';
-import { listenSpanishOnce, stopListeningSpanish } from '../../services/speechInput';
-import { speakSpanish, stopSpeaking } from '../../services/voiceService';
+import { OFFICIAL_TRAMITE_SOURCES } from '../../services/webTramiteService';
+import { MeshStats } from '../../types/vozGuia';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const reqSeqRef = useRef(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [query, setQuery] = useState('');
+  const [customUrl, setCustomUrl] = useState('');
   const [feedback, setFeedback] = useState('');
+  const [meshStats, setMeshStats] = useState<MeshStats>(() => meshService.getStats());
 
-  const handleMicPress = async () => {
-    if (isListening) {
-      setIsListening(false);
-      await stopListeningSpanish();
-      await stopSpeaking();
-      setFeedback('Micrófono detenido.');
-      return;
-    }
+  const nextReqId = useCallback(() => {
+    reqSeqRef.current += 1;
+    return String(reqSeqRef.current);
+  }, []);
 
-    setIsListening(true);
-    setFeedback('Escuchando tu voz... Di qué trámite necesitas.');
-    await stopSpeaking();
+  useEffect(() => {
+    return meshService.subscribe(() => {
+      setMeshStats(meshService.getStats());
+    });
+  }, []);
 
-    const capture = await listenSpanishOnce();
-    setIsListening(false);
-    setFeedback(capture.note);
-
-    if (capture.status === 'recognized' && capture.transcript) {
+  const handleVoiceTranscript = useCallback(
+    (transcript: string) => {
       router.push({
         pathname: '/(tabs)/conversacion',
-        params: { prompt: capture.transcript, reqId: String(Date.now()) },
+        params: {
+          prompt: transcript,
+          autoSpeak: '1',
+          reqId: nextReqId(),
+        },
       });
-      return;
-    }
+    },
+    [nextReqId, router]
+  );
 
-    const settings = kvStore.getSettings();
-    void speakSpanish(capture.note, { rate: settings.speechRate });
-  };
+  const { isListening, isTranscribing, toggleVoice, usesTapToStopRecording } = useVoiceCapture({
+    onTranscript: handleVoiceTranscript,
+    onFeedback: setFeedback,
+  });
 
   const handleScanDocument = async (mode: DocumentPickMode) => {
     setFeedback(
@@ -80,42 +85,78 @@ export default function HomeScreen() {
     });
   };
 
+  const handleOpenWebSource = useCallback(
+    (url: string, label?: string) => {
+      const cleanUrl = url.trim();
+      if (!cleanUrl) return;
+      setCustomUrl('');
+      router.push({
+        pathname: '/(tabs)/conversacion',
+        params: {
+          sourceUrl: cleanUrl,
+          prompt: label || cleanUrl,
+          autoSpeak: '1',
+          reqId: nextReqId(),
+        },
+      });
+    },
+    [nextReqId, router]
+  );
+
   const handleSendText = () => {
     const clean = query.trim();
     if (!clean) return;
     setQuery('');
     router.push({
       pathname: '/(tabs)/conversacion',
-      params: { prompt: clean, reqId: String(Date.now()) },
+      params: { prompt: clean, reqId: nextReqId() },
     });
   };
 
   const handleCategoryPress = (category: string, example: string) => {
     router.push({
       pathname: '/(tabs)/conversacion',
-      params: { category, prompt: example, reqId: String(Date.now()) },
+      params: { category, prompt: example, reqId: nextReqId() },
     });
   };
+
+  const meshStatusLabel =
+    meshStats.transportMode === 'ble-gatt'
+      ? `Red BLE GATT activa • ${meshStats.connectedPeers} vecino(s)`
+      : meshStats.transportMode === 'lan-relay'
+      ? `Red Mesh LAN activa • ${meshStats.connectedPeers} vecino(s)`
+      : meshStats.transportMode === 'web-broadcast'
+      ? `Red Mesh Web activa • ${meshStats.connectedPeers} nodo(s)`
+      : 'Catálogo offline listo • Toca Ajustes para Red Mesh';
 
   return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <AppHeader title="Inicio" onOpenNotices={() => setDrawerOpen(true)} />
+      <AppHeader
+        title="Inicio"
+        onOpenNotices={() => setDrawerOpen(true)}
+        meshActive={meshStats.isRunning}
+      />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         {/* Etiqueta informativa Red Mesh */}
-        <View style={styles.meshPill}>
+        <Pressable
+          style={styles.meshPill}
+          onPress={() => router.push('/(tabs)/mesh')}
+          accessibilityRole="button"
+        >
           <View style={styles.pulseDot} />
-          <Text style={styles.meshPillText}>Funcionando sin internet vía catálogo local y Red Mesh</Text>
-        </View>
+          <Text style={styles.meshPillText}>{meshStatusLabel}</Text>
+        </Pressable>
 
         {/* Título de bienvenida */}
         <View style={styles.titleSection}>
           <Text style={styles.mainTitle}>¿En qué trámite te ayudo hoy?</Text>
           <Text style={styles.subTitle}>
-            Toca el micrófono para hablar, toma foto a un papel oficial o elige una categoría.
+            Toca el micrófono para hablar, extrae una guía de una página oficial o toma foto a un
+            papel.
           </Text>
         </View>
 
@@ -124,27 +165,117 @@ export default function HomeScreen() {
           <View style={styles.waveOuter} />
           <View style={styles.waveInner} />
           <Pressable
-            style={[styles.micButton, isListening && styles.micButtonActive]}
-            onPress={() => void handleMicPress()}
+            style={[
+              styles.micButton,
+              isListening && styles.micButtonActive,
+              isTranscribing && styles.micButtonProcessing,
+            ]}
+            onPress={() => void toggleVoice()}
+            disabled={isTranscribing}
             accessibilityRole="button"
-            accessibilityLabel={isListening ? 'Detener micrófono' : 'Toca para hablar'}
+            accessibilityLabel={
+              isListening
+                ? 'Detener micrófono y enviar voz'
+                : isTranscribing
+                ? 'Procesando tu voz'
+                : 'Toca para hablar'
+            }
           >
-            <Ionicons
-              name={isListening ? 'stop' : 'mic'}
-              size={54}
-              color={Colors.onPrimary}
-            />
+            {isTranscribing ? (
+              <ActivityIndicator size="large" color={Colors.onPrimary} />
+            ) : (
+              <Ionicons
+                name={isListening ? 'stop' : 'mic'}
+                size={54}
+                color={Colors.onPrimary}
+              />
+            )}
             <Text style={styles.micButtonText}>
-              {isListening ? 'Escuchando...' : 'Toca para hablar'}
+              {isTranscribing
+                ? 'Entendiendo...'
+                : isListening
+                ? usesTapToStopRecording
+                  ? 'Toca para enviar'
+                  : 'Escuchando...'
+                : 'Toca para hablar'}
             </Text>
           </Pressable>
 
-          {isListening && (
+          {(isListening || isTranscribing) && (
             <View style={styles.voiceStatusPill}>
               <Ionicons name="pulse" size={18} color={Colors.onSecondaryContainer} />
-              <Text style={styles.voiceStatusText}>Escuchando tu voz...</Text>
+              <Text style={styles.voiceStatusText}>
+                {isTranscribing
+                  ? 'Transcribiendo tu voz...'
+                  : usesTapToStopRecording
+                  ? 'Grabando... habla y toca el botón para enviar'
+                  : 'Escuchando tu voz...'}
+              </Text>
             </View>
           )}
+        </View>
+
+        {feedback ? (
+          <View style={styles.feedbackBanner}>
+            <Ionicons name="information-circle" size={20} color={Colors.secondary} />
+            <Text style={styles.feedbackText}>{feedback}</Text>
+          </View>
+        ) : null}
+
+        {/* Extraer guía funcional desde páginas oficiales */}
+        <View style={styles.webCard}>
+          <View style={styles.visionHeader}>
+            <View style={[styles.visionIconBox, { backgroundColor: Colors.primary }]}>
+              <Ionicons name="globe-outline" size={24} color={Colors.onPrimary} />
+            </View>
+            <View style={styles.visionHeaderText}>
+              <Text style={styles.visionTitle}>Guía desde página oficial (gob.mx)</Text>
+              <Text style={styles.visionSubtitle}>
+                Toca un portal o pega un enlace para extraer requisitos y pasos interactivos
+                guardados offline.
+              </Text>
+            </View>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.portalChipsRow}
+          >
+            {OFFICIAL_TRAMITE_SOURCES.map((portal) => (
+              <Pressable
+                key={portal.id}
+                style={styles.portalChip}
+                onPress={() => handleOpenWebSource(portal.url, `Guía de ${portal.label}`)}
+                accessibilityRole="button"
+              >
+                <Ionicons name="open-outline" size={15} color={Colors.onPrimaryFixed} />
+                <Text style={styles.portalChipText}>{portal.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          <View style={styles.urlRow}>
+            <TextInput
+              style={styles.urlInput}
+              value={customUrl}
+              onChangeText={setCustomUrl}
+              placeholder="O pega una URL (ej. gob.mx/tramites...)"
+              placeholderTextColor={Colors.onSurfaceVariant}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              onSubmitEditing={() => handleOpenWebSource(customUrl)}
+            />
+            <Pressable
+              style={styles.urlGoBtn}
+              onPress={() => handleOpenWebSource(customUrl)}
+              accessibilityRole="button"
+              accessibilityLabel="Extraer guía desde URL"
+            >
+              <Text style={styles.urlGoText}>Extraer</Text>
+            </Pressable>
+          </View>
         </View>
 
         {/* Tarjeta destacada: Lectura de documentos con Gemini Vision */}
@@ -156,7 +287,8 @@ export default function HomeScreen() {
             <View style={styles.visionHeaderText}>
               <Text style={styles.visionTitle}>Leer documento o aviso con foto</Text>
               <Text style={styles.visionSubtitle}>
-                Gemini analiza recetas, citas, volantes o convocatorias y te los explica con voz clara.
+                Gemini analiza recetas, citas, volantes o convocatorias y te los explica con voz
+                clara.
               </Text>
             </View>
           </View>
@@ -196,16 +328,9 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {feedback ? (
-          <View style={styles.feedbackBanner}>
-            <Ionicons name="information-circle" size={20} color={Colors.secondary} />
-            <Text style={styles.feedbackText}>{feedback}</Text>
-          </View>
-        ) : null}
-
         {/* Categorías rápidas */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Categorías rápidas</Text>
+          <Text style={styles.sectionTitle}>Categorías rápidas (offline)</Text>
         </View>
 
         <View style={styles.categoriesList}>
@@ -276,7 +401,7 @@ export default function HomeScreen() {
               style={styles.textInput}
               value={query}
               onChangeText={setQuery}
-              placeholder="Escribe tu duda o trámite..."
+              placeholder="Escribe cualquier trámite (ej. pasaporte, CURP, IMSS)..."
               placeholderTextColor={Colors.onSurfaceVariant}
               onSubmitEditing={handleSendText}
               returnKeyType="send"
@@ -294,7 +419,11 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* Drawer del tablón de avisos */}
-      <NoticeDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <NoticeDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        meshNodesCount={meshStats.connectedPeers}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -380,6 +509,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   micButtonActive: {
+    backgroundColor: Colors.error,
+  },
+  micButtonProcessing: {
     backgroundColor: Colors.secondary,
   },
   micButtonText: {
@@ -402,6 +534,59 @@ const styles = StyleSheet.create({
   voiceStatusText: {
     ...Typography.labelSm,
     color: Colors.onSecondaryContainer,
+  },
+  webCard: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    gap: 12,
+  },
+  portalChipsRow: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  portalChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 42,
+    paddingHorizontal: 14,
+    borderRadius: 99,
+    backgroundColor: Colors.primaryFixed,
+  },
+  portalChipText: {
+    ...Typography.labelSm,
+    color: Colors.onPrimaryFixed,
+  },
+  urlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  urlInput: {
+    flex: 1,
+    minHeight: 48,
+    backgroundColor: Colors.surfaceContainerLow,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    color: Colors.onSurface,
+  },
+  urlGoBtn: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  urlGoText: {
+    ...Typography.labelMd,
+    color: Colors.onPrimary,
   },
   visionCard: {
     backgroundColor: Colors.surfaceContainerLowest,

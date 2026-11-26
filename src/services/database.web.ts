@@ -1,13 +1,49 @@
 import { TRAMITES_CATALOG } from '../data/tramitesCatalog';
 import { SearchResult, TramiteCategory, TramiteRecord } from '../types/vozGuia';
-import { createVectorIndex, IndexedTramite, searchVectorIndex } from './vectorSearch';
+import {
+  buildNormalizedVector,
+  buildTramiteSearchText,
+  createVectorIndex,
+  IndexedTramite,
+  searchVectorIndex,
+} from './vectorSearch';
 
 let cachedIndex: IndexedTramite[] | null = null;
 const MESH_CACHE_STORAGE_KEY = 'vozguia:mesh_cache';
+const CUSTOM_TRAMITES_STORAGE_KEY = 'vozguia:custom_tramites';
+
+function loadStoredCustomTramites(): TramiteRecord[] {
+  try {
+    if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) return [];
+    const raw = globalThis.localStorage.getItem(CUSTOM_TRAMITES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as TramiteRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistCustomTramites(list: TramiteRecord[]): void {
+  try {
+    if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) return;
+    globalThis.localStorage.setItem(CUSTOM_TRAMITES_STORAGE_KEY, JSON.stringify(list.slice(0, 30)));
+  } catch {
+    // Ignore storage quota or private-mode errors on web
+  }
+}
 
 export async function initDatabase(): Promise<void> {
   if (!cachedIndex) {
-    cachedIndex = createVectorIndex(TRAMITES_CATALOG);
+    const custom = loadStoredCustomTramites();
+    const mergedMap = new Map<string, TramiteRecord>();
+    for (const item of TRAMITES_CATALOG) {
+      mergedMap.set(item.id, item);
+    }
+    for (const item of custom) {
+      mergedMap.set(item.id, item);
+    }
+    cachedIndex = createVectorIndex(Array.from(mergedMap.values()));
   }
 }
 
@@ -36,6 +72,17 @@ export async function searchTramitesLocal(
     category: options?.category,
     limit: options?.limit ?? 5,
   });
+}
+
+export async function saveCustomTramite(tramite: TramiteRecord): Promise<void> {
+  await initDatabase();
+  const vector = buildNormalizedVector(buildTramiteSearchText(tramite));
+  const current = cachedIndex ?? createVectorIndex(TRAMITES_CATALOG);
+  const filtered = current.filter((item) => item.tramite.id !== tramite.id);
+  cachedIndex = [{ tramite, vector }, ...filtered];
+
+  const custom = loadStoredCustomTramites().filter((item) => item.id !== tramite.id);
+  persistCustomTramites([tramite, ...custom]);
 }
 
 export async function saveMeshCachedResponse(
