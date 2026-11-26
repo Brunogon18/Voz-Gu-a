@@ -1,14 +1,11 @@
 import React from 'react';
-import { View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { SpeechControlBar } from '../../components/SpeechControlBar';
 import { Colors } from '../../theme/tokens';
 
 export default function TabsLayout() {
   return (
-    <View style={{ flex: 1 }}>
-      <Tabs
+    <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: Colors.primary,
@@ -66,24 +63,6 @@ export default function TabsLayout() {
           ),
         }}
       />
-      {/* Pestaña oculta para Ajustes de red mesh si se requiere acceder */}
-      <Tabs.Screen
-        name="mesh"
-        options={{
-          href: null,
-          title: 'Ajustes',
-        }}
-      />
-      {/* Pestaña anterior redirigida o mantenida sin visualización directa */}
-      <Tabs.Screen
-        name="tramites"
-        options={{
-          href: null,
-          title: 'Trámites',
-        }}
-      />
-      </Tabs>
-      <SpeechControlBar variant="floating" />
-    </View>
+    </Tabs>
   );
 }

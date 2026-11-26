@@ -893,7 +893,7 @@ export default function ConversacionScreen() {
               {guide?.diagnosticsNote ? (
                 <Pressable
                   style={styles.diagnosticsRow}
-                  onPress={() => router.push('/(tabs)/mesh')}
+                  onPress={() => router.push('/mesh')}
                   accessibilityRole="button"
                 >
                   <Ionicons name="settings-outline" size={15} color={Colors.onSurfaceVariant} />

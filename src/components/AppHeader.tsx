@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Typography } from '../theme/tokens';
@@ -19,11 +19,21 @@ export function AppHeader({
   showBackButton = false,
 }: AppHeaderProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === 'web' ? 0 : insets.top;
 
   const handleOpenSettings = () => {
-    router.push('/(tabs)/mesh');
+    if (pathname === '/mesh') return;
+    router.push('/mesh');
+  };
+
+  const handleGoBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
   };
 
   return (
@@ -31,10 +41,10 @@ export function AppHeader({
       <View style={styles.container}>
         {showBackButton ? (
           <Pressable
-            onPress={() => router.replace('/(tabs)')}
+            onPress={handleGoBack}
             style={styles.notifBtn}
             accessibilityRole="button"
-            accessibilityLabel="Volver a Inicio"
+            accessibilityLabel="Volver"
           >
             <Ionicons name="arrow-back" size={24} color={Colors.primary} />
           </Pressable>

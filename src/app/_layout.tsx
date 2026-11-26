@@ -1,8 +1,9 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SpeechControlBar } from '../components/SpeechControlBar';
 import { initDatabase } from '../services/database';
 import { meshService } from '../services/meshService';
 
@@ -41,10 +42,15 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-      </Stack>
+      <View style={{ flex: 1 }}>
+        <StatusBar style="dark" />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="mesh" />
+          <Stack.Screen name="tramites" />
+        </Stack>
+        <SpeechControlBar variant="floating" />
+      </View>
     </SafeAreaProvider>
   );
 }

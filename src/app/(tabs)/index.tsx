@@ -158,7 +158,7 @@ export default function HomeScreen() {
         {/* Etiqueta informativa Red Mesh */}
         <Pressable
           style={styles.meshPill}
-          onPress={() => router.push('/(tabs)/mesh')}
+          onPress={() => router.push('/mesh')}
           accessibilityRole="button"
         >
           <View style={styles.pulseDot} />

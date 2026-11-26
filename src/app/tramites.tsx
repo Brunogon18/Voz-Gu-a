@@ -1,12 +1,12 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { AccessibleButton } from '../../components/AccessibleButton';
-import { useSpeechStatus } from '../../hooks/useSpeechStatus';
-import { isSqliteVecActive, searchTramitesLocal } from '../../services/database';
-import { kvStore } from '../../services/kvStore';
-import { pauseSpeaking, resumeSpeaking, speakSpanish } from '../../services/voiceService';
-import { SearchResult, TramiteCategory } from '../../types/vozGuia';
+import { AccessibleButton } from '../components/AccessibleButton';
+import { useSpeechStatus } from '../hooks/useSpeechStatus';
+import { isSqliteVecActive, searchTramitesLocal } from '../services/database';
+import { kvStore } from '../services/kvStore';
+import { pauseSpeaking, resumeSpeaking, speakSpanish } from '../services/voiceService';
+import { SearchResult, TramiteCategory } from '../types/vozGuia';
 
 const CATEGORIES: { key: 'all' | TramiteCategory; label: string }[] = [
   { key: 'all', label: 'Todos' },

@@ -11,21 +11,21 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AccessibleButton } from '../../components/AccessibleButton';
-import { AppHeader } from '../../components/AppHeader';
+import { AccessibleButton } from '../components/AccessibleButton';
+import { AppHeader } from '../components/AppHeader';
 import {
   getNativeMeshCapabilities,
   requestAndroidRuntimePermissions,
-} from '../../native/androidBridge';
+} from '../native/androidBridge';
 import {
   GEMINI_MODEL_OPTIONS,
   resolveGeminiModel,
   testGeminiConnection,
-} from '../../services/geminiService';
-import { kvStore } from '../../services/kvStore';
-import { meshService } from '../../services/meshService';
-import { Colors, Spacing, Typography } from '../../theme/tokens';
-import { AppSettings, MeshPeer, MeshStats } from '../../types/vozGuia';
+} from '../services/geminiService';
+import { kvStore } from '../services/kvStore';
+import { meshService } from '../services/meshService';
+import { Colors, Spacing, Typography } from '../theme/tokens';
+import { AppSettings, MeshPeer, MeshStats } from '../types/vozGuia';
 
 export default function MeshAndSettingsScreen() {
   const [settings, setSettings] = useState<AppSettings>(() => kvStore.getSettings());
