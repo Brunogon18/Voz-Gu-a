@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+
+<html lang="es"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"on-error-container":"#93000a","on-secondary-container":"#007166","tertiary-container":"#791f07","on-surface":"#1a1c1a","secondary-container":"#8cf5e4","inverse-primary":"#a0cedd","surface-container":"#efeeeb","surface-container-low":"#f4f3f1","background":"#faf9f6","on-tertiary":"#ffffff","primary-fixed-dim":"#a0cedd","on-primary-container":"#85b2c1","primary-fixed":"#bceafa","surface-container-high":"#e9e8e5","on-tertiary-fixed":"#3c0700","primary-container":"#144552","on-secondary-fixed":"#00201c","surface-variant":"#e3e2e0","surface-container-highest":"#e3e2e0","inverse-on-surface":"#f2f1ee","error-container":"#ffdad6","inverse-surface":"#2f312f","secondary":"#006a60","secondary-fixed-dim":"#6fd8c8","surface-dim":"#dbdad7","tertiary":"#560e00","on-primary":"#ffffff","tertiary-fixed-dim":"#ffb4a2","secondary-fixed":"#8cf5e4","tertiary-fixed":"#ffdad2","surface-tint":"#386472","surface-container-lowest":"#ffffff","on-primary-fixed-variant":"#1e4c5a","surface-bright":"#faf9f6","on-secondary-fixed-variant":"#005048","on-error":"#ffffff","on-background":"#1a1c1a","on-tertiary-container":"#ff8b6e","on-surface-variant":"#41484b","outline-variant":"#c0c8cb","surface":"#faf9f6","on-tertiary-fixed-variant":"#83260e","on-primary-fixed":"#001f27","on-secondary":"#ffffff","primary":"#002e39","error":"#ba1a1a","outline":"#71787b"},"borderRadius":{"DEFAULT":"0.25rem","lg":"0.5rem","xl":"0.75rem","full":"9999px"},"spacing":{"space-md":"1rem","space-xl":"2rem","space-lg":"1.5rem","space-sm":"0.75rem","margin":"1.25rem","space-xs":"0.5rem","gutter":"1rem"},"fontFamily":{"headline-md":["Atkinson Hyperlegible Next"],"body-sm":["Atkinson Hyperlegible Next"],"label-md":["Atkinson Hyperlegible Next"],"label-lg":["Atkinson Hyperlegible Next"],"body-md":["Atkinson Hyperlegible Next"],"body-lg":["Atkinson Hyperlegible Next"],"headline-lg":["Atkinson Hyperlegible Next"],"headline-sm":["Atkinson Hyperlegible Next"],"label-sm":["Atkinson Hyperlegible Next"],"headline-lg-mobile":["Atkinson Hyperlegible Next"]},"fontSize":{"headline-md":["24px",{"lineHeight":"32px","fontWeight":"700"}],"body-sm":["14px",{"lineHeight":"20px","fontWeight":"400"}],"label-md":["16px",{"lineHeight":"20px","fontWeight":"700"}],"label-lg":["18px",{"lineHeight":"24px","fontWeight":"700"}],"body-md":["16px",{"lineHeight":"24px","fontWeight":"400"}],"body-lg":["18px",{"lineHeight":"28px","fontWeight":"400"}],"headline-lg":["36px",{"lineHeight":"44px","letterSpacing":"-0.02em","fontWeight":"700"}],"headline-sm":["20px",{"lineHeight":"28px","fontWeight":"700"}],"label-sm":["14px",{"lineHeight":"18px","fontWeight":"700"}],"headline-lg-mobile":["28px",{"lineHeight":"36px","letterSpacing":"-0.01em","fontWeight":"700"}]}}}}</script></head><body class="bg-surface text-on-surface font-body-md text-body-md flex flex-col"><header class="fixed top-0 w-full z-50 pt-safe bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-16 px-margin flex items-center justify-between gap-space-xs"><button aria-label="Abrir tablón de avisos" class="relative w-12 h-12 flex items-center justify-center rounded-full text-on-surface hover:bg-surface-container transition-colors"><span class="material-symbols-outlined text-[26px]">notifications</span><span class="absolute top-2.5 right-2.5 w-2.5 h-2.5 rounded-full bg-error"></span></button><h1 class="font-headline-sm text-headline-sm text-primary truncate">Inicio</h1><div class="flex items-center gap-space-xs"><div class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-secondary-container text-on-secondary-container"><span class="material-symbols-outlined text-[16px]">bluetooth_connected</span><span class="font-label-sm text-label-sm whitespace-nowrap">Mesh activo</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex flex-col relative w-full px-margin pt-16 pb-24 bg-surface"><div class="flex flex-col w-full gap-space-lg py-space-sm">
+<!-- 1) Saludo claro y etiqueta informativa de Red Mesh BLE -->
+<section class="flex flex-col gap-space-sm">
+<div class="inline-flex items-center self-start gap-2 px-3 py-1.5 rounded-full bg-secondary-container text-on-secondary-container shadow-sm">
+<span class="w-2.5 h-2.5 rounded-full bg-secondary animate-pulse"></span>
+<span class="font-label-sm text-label-sm">Funcionando sin internet vía Red Mesh BLE</span>
+</div>
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface">
+      ¿En qué trámite te ayudo hoy?
+    </h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant">
+      Toca el micrófono para hablar o elige una categoría.
+    </p>
+</section>
+<!-- 2) Botón circular grande y prominente de micrófono con sutil onda de voz -->
+<section class="flex flex-col items-center justify-center py-space-md">
+<div class="relative flex items-center justify-center">
+<!-- Ondas de voz sutiles -->
+<span class="absolute w-48 h-48 rounded-full bg-primary/10 transition-all duration-500 scale-95 opacity-70 pointer-events-none" id="voice-wave-outer"></span>
+<span class="absolute w-40 h-40 rounded-full bg-primary/15 transition-all duration-500 scale-95 opacity-80 pointer-events-none" id="voice-wave-inner"></span>
+<!-- Botón principal de micrófono -->
+<button aria-label="Toca para hablar con Voz Guía" aria-pressed="false" class="relative z-10 w-36 h-36 rounded-full bg-primary text-on-primary shadow-xl flex flex-col items-center justify-center gap-2 transition-all duration-300 active:scale-95 hover:bg-primary-container focus:outline-none" id="mic-button" type="button">
+<span class="material-symbols-outlined text-[48px]" id="mic-icon" style="font-variation-settings: 'FILL' 1;">mic</span>
+<span class="font-label-md text-label-md px-2 text-center leading-tight" id="mic-label">Toca para hablar</span>
+</button>
+</div>
+<!-- Estado de voz en vivo (oculto inicialmente, aparece al escuchar) -->
+<div class="mt-space-md hidden items-center gap-2 px-4 py-2 rounded-full bg-secondary-container text-on-secondary-container shadow-sm" id="voice-status">
+<span class="material-symbols-outlined text-[20px] animate-bounce">graphic_eq</span>
+<span class="font-label-md text-label-md">Escuchando tu voz...</span>
+</div>
+</section>
+<!-- 3) Categorías rápidas en tarjetas grandes y fáciles de tocar -->
+<section class="flex flex-col gap-space-sm">
+<h3 class="font-headline-sm text-headline-sm text-on-surface">
+      Categorías rápidas
+    </h3>
+<div class="flex flex-col gap-space-sm">
+<!-- Salud -->
+<button class="category-card w-full text-left bg-surface-container-lowest text-on-surface rounded-xl p-5 shadow-sm flex items-center gap-4 transition-transform active:scale-[0.98] hover:bg-surface-container-low" data-category="Salud" type="button">
+<div class="w-14 h-14 rounded-xl bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[32px]" style="font-variation-settings: 'FILL' 1;">medical_services</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="font-headline-sm text-headline-sm text-on-surface truncate">Salud</p>
+<p class="font-body-md text-body-md text-on-surface-variant truncate">Citas médicas</p>
+</div>
+<span class="material-symbols-outlined text-[28px] text-primary shrink-0">chevron_right</span>
+</button>
+<!-- Educación -->
+<button class="category-card w-full text-left bg-surface-container-lowest text-on-surface rounded-xl p-5 shadow-sm flex items-center gap-4 transition-transform active:scale-[0.98] hover:bg-surface-container-low" data-category="Educación" type="button">
+<div class="w-14 h-14 rounded-xl bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[32px]" style="font-variation-settings: 'FILL' 1;">school</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="font-headline-sm text-headline-sm text-on-surface truncate">Educación</p>
+<p class="font-body-md text-body-md text-on-surface-variant truncate">Escuelas y constancias</p>
+</div>
+<span class="material-symbols-outlined text-[28px] text-primary shrink-0">chevron_right</span>
+</button>
+<!-- Becas -->
+<button class="category-card w-full text-left bg-surface-container-lowest text-on-surface rounded-xl p-5 shadow-sm flex items-center gap-4 transition-transform active:scale-[0.98] hover:bg-surface-container-low" data-category="Becas" type="button">
+<div class="w-14 h-14 rounded-xl bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[32px]" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="font-headline-sm text-headline-sm text-on-surface truncate">Becas</p>
+<p class="font-body-md text-body-md text-on-surface-variant truncate">Convocatorias</p>
+</div>
+<span class="material-symbols-outlined text-[28px] text-primary shrink-0">chevron_right</span>
+</button>
+</div>
+</section>
+<!-- 4) Barrita de entrada de texto clara y accesible -->
+<section class="flex flex-col gap-space-xs pt-space-xs">
+<label class="font-label-md text-label-md text-on-surface" for="chat-input">
+      ¿Prefieres escribir?
+    </label>
+<form class="flex items-center gap-space-xs bg-surface-container-lowest rounded-xl p-2 shadow-md" id="chat-form">
+<input class="flex-1 min-w-0 h-12 px-3 bg-transparent text-on-surface font-body-lg text-body-lg placeholder:text-on-surface-variant focus:outline-none" id="chat-input" placeholder="Escribe tu duda o trámite..." type="text"/>
+<button aria-label="Enviar mensaje" class="w-12 h-12 rounded-xl bg-primary text-on-primary flex items-center justify-center shrink-0 transition-transform active:scale-95 hover:bg-primary-container" type="submit">
+<span class="material-symbols-outlined text-[24px]">send</span>
+</button>
+</form>
+<!-- Retroalimentación rápida al enviar o elegir categoría -->
+<div class="hidden mt-space-xs p-3 rounded-xl bg-primary-fixed text-on-primary-fixed font-body-md text-body-md shadow-sm items-center gap-2" id="feedback-banner">
+<span class="material-symbols-outlined text-[22px] shrink-0">assistant</span>
+<span class="flex-1 min-w-0" id="feedback-text"></span>
+</div>
+</section>
+</div>
+<script>
+  (function () {
+    const micBtn = document.getElementById('mic-button');
+    const micIcon = document.getElementById('mic-icon');
+    const micLabel = document.getElementById('mic-label');
+    const waveOuter = document.getElementById('voice-wave-outer');
+    const waveInner = document.getElementById('voice-wave-inner');
+    const voiceStatus = document.getElementById('voice-status');
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+    const feedbackBanner = document.getElementById('feedback-banner');
+    const feedbackText = document.getElementById('feedback-text');
+    const categoryCards = document.querySelectorAll('.category-card');
+
+    let isListening = false;
+
+    function showFeedback(message) {
+      feedbackText.textContent = message;
+      feedbackBanner.classList.remove('hidden');
+      feedbackBanner.classList.add('flex');
+    }
+
+    micBtn.addEventListener('click', function () {
+      isListening = !isListening;
+      micBtn.setAttribute('aria-pressed', String(isListening));
+
+      if (isListening) {
+        micBtn.classList.remove('bg-primary', 'text-on-primary', 'hover:bg-primary-container');
+        micBtn.classList.add('bg-secondary', 'text-on-secondary');
+        micIcon.textContent = 'graphic_eq';
+        micLabel.textContent = 'Escuchando...';
+        waveOuter.classList.remove('bg-primary/10', 'scale-95');
+        waveOuter.classList.add('bg-secondary/20', 'scale-110', 'animate-ping');
+        waveInner.classList.remove('bg-primary/15', 'scale-95');
+        waveInner.classList.add('bg-secondary/25', 'scale-105');
+        voiceStatus.classList.remove('hidden');
+        voiceStatus.classList.add('inline-flex');
+      } else {
+        micBtn.classList.remove('bg-secondary', 'text-on-secondary');
+        micBtn.classList.add('bg-primary', 'text-on-primary', 'hover:bg-primary-container');
+        micIcon.textContent = 'mic';
+        micLabel.textContent = 'Toca para hablar';
+        waveOuter.classList.remove('bg-secondary/20', 'scale-110', 'animate-ping');
+        waveOuter.classList.add('bg-primary/10', 'scale-95');
+        waveInner.classList.remove('bg-secondary/25', 'scale-105');
+        waveInner.classList.add('bg-primary/15', 'scale-95');
+        voiceStatus.classList.remove('inline-flex');
+        voiceStatus.classList.add('hidden');
+      }
+    });
+
+    categoryCards.forEach(function (card) {
+      card.addEventListener('click', function () {
+        const category = card.getAttribute('data-category');
+        showFeedback('Abriendo guía de ' + category + '...');
+      });
+    });
+
+    chatForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const value = chatInput.value.trim();
+      if (!value) {
+        chatInput.focus();
+        return;
+      }
+      showFeedback('Buscando ayuda para: "' + value + '"');
+      chatInput.value = '';
+    });
+  })();
+</script></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface/80 backdrop-blur-xl shadow-[0_-1px_8px_rgba(0,0,0,0.04)]" data-active-classes="text-primary bg-primary-fixed/40 font-bold"><div class="flex justify-around items-center h-20 px-space-sm gap-space-xs"><a aria-current="page" class="flex flex-col items-center justify-center gap-1 flex-1 h-16 rounded-xl transition-colors text-primary bg-primary-fixed/40 font-bold" data-path="inicio" href="#"><span class="material-symbols-outlined text-[28px]">home</span><span class="font-label-sm text-label-sm">Inicio</span></a><a class="flex flex-col items-center justify-center gap-1 flex-1 h-16 rounded-xl text-on-surface-variant hover:text-on-surface transition-colors" data-path="conversación" href="#"><span class="material-symbols-outlined text-[28px]">record_voice_over</span><span class="font-label-sm text-label-sm">Conversación</span></a><a class="flex flex-col items-center justify-center gap-1 flex-1 h-16 rounded-xl text-on-surface-variant hover:text-on-surface transition-colors" data-path="historial" href="#"><span class="material-symbols-outlined text-[28px]">history</span><span class="font-label-sm text-label-sm">Historial</span></a></div></nav></body></html>

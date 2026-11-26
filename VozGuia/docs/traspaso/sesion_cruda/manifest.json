@@ -1,0 +1,59 @@
+{
+  "sesion": "778aedbd-7883-4fff-adaa-e395656cb6e2",
+  "exportado": "2026-11-26T14:42:26",
+  "origen": {
+    "conversacion": "C:\\Users\\brits\\.gemini\\antigravity-cli\\conversations\\778aedbd-7883-4fff-adaa-e395656cb6e2.db",
+    "transcripcion": "C:\\Users\\brits\\.gemini\\antigravity-cli\\brain\\778aedbd-7883-4fff-adaa-e395656cb6e2\\.system_generated\\logs\\transcript_full.jsonl"
+  },
+  "pasos": 255,
+  "plantillas_stitch": [
+    {
+      "archivo": "01_inicio.html",
+      "chars": 15596
+    },
+    {
+      "archivo": "02_tablon-avisos.html",
+      "chars": 13296
+    },
+    {
+      "archivo": "03_conversacion.html",
+      "chars": 14746
+    },
+    {
+      "archivo": "04_historial.html",
+      "chars": 15722
+    }
+  ],
+  "artefactos": [
+    {
+      "archivo": "conversacion.db",
+      "bytes": 4456448,
+      "sha256_16": "d74058eaadaa6643"
+    },
+    {
+      "archivo": "history.jsonl",
+      "bytes": 25654,
+      "sha256_16": "e27f20d11802e1b5"
+    },
+    {
+      "archivo": "annotations.pbtxt",
+      "bytes": 34,
+      "sha256_16": "9f3a5de0b30bfc17"
+    },
+    {
+      "archivo": "transcript_full.jsonl",
+      "bytes": 635286,
+      "sha256_16": "210b3b08cb6eba2d"
+    },
+    {
+      "archivo": "transcript.jsonl",
+      "bytes": 432201,
+      "sha256_16": "703c8e7b5b29c38e"
+    },
+    {
+      "archivo": "prompt_auditoria.md",
+      "bytes": 3182,
+      "sha256_16": "9dd3cc028f47209b"
+    }
+  ]
+}
